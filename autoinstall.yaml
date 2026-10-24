@@ -1,0 +1,109 @@
+#cloud-config
+# yaml-language-server: $schema=./autoinstall-schema.json
+autoinstall:
+  version: 1
+  
+  refresh-installer:
+    update: true
+    channel: "26.04/stable"
+    
+  
+  # Pozwala na ręczne wpisanie użytkownika/hasła podczas instalacji w VM
+  interactive-sections:
+    - identity
+
+  # Konfiguracja środowiska i pakietów
+  timezone: Europe/Warsaw
+  locale: pl_PL.UTF-8
+  keyboard:
+    layout: pl
+  
+  accepted-errors:
+    - running-in-vm
+    
+  # Automatyczna instalacja kodeków i sterowników własnościowych (odpowiedniki checkboxów)
+  codecs:
+    install: true
+  drivers:
+    install: true
+
+  # Domyślny zestaw pakietów podstawowych
+  packages:
+    - btrfs-progs
+    - git
+#    - curl
+
+  # Główna konfiguracja pamięci masowej (Btrfs + TPM LUKS2)
+  storage:
+    config:
+      # 1. Tabela partycji GPT na pierwszym dysku systemowym
+      - id: disk-main
+        type: disk
+        ptable: gpt
+        preserve: false
+        wipe: superblock-data
+        grub_device: true
+
+      # 2. Partycja EFI Boot (FAT32)
+      - id: partition-efi
+        type: partition
+        device: disk-main
+        size: 1GB
+        flag: boot
+        grub_device: true
+
+      - id: format-efi
+        type: format
+        fstype: fat32
+        volume: partition-efi
+
+      - id: mount-efi
+        type: mount
+        device: format-efi
+        path: /boot/efi
+
+      # 3. Partycja systemowa szyfrowana przez LUKS2 z kluczem w TPM 2.0
+      - id: partition-root
+        type: partition
+        device: disk-main
+        size: -1
+
+      - id: luks-root
+        type: dm_crypt
+        volume: partition-root
+        encryption: luks2
+        tpm: true
+
+      # 4. Formatowanie kontenera LUKS do Btrfs
+      - id: format-btrfs
+        type: format
+        fstype: btrfs
+        volume: luks-root
+
+      # 5. Podwolumen dla systemu głównego (@ -> /)
+      - id: subvol-root
+        type: btrfs
+        subvolume: "@"
+        volume: format-btrfs
+
+      - id: mount-root
+        type: mount
+        device: subvol-root
+        path: /
+        options: "subvol=@,compress=zstd:1,discard=async,noatime,space_cache=v2"
+
+      # 6. Podwolumen dla katalogu domowego (@home -> /home)
+      - id: subvol-home
+        type: btrfs
+        subvolume: "@home"
+        volume: format-btrfs
+
+      - id: mount-home
+        type: mount
+        device: subvol-home
+        path: /home
+        options: "subvol=@home,compress=zstd:1,discard=async,noatime,space_cache=v2"
+  
+  late-commands:
+    - curtin in-target -- target apt-get update
+    - curtin in-target -- target apt-get upgrade -y
