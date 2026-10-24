@@ -5,6 +5,8 @@ Aktualnie zaimplementowana funkcjonalność:
   - walidacja: odczytuje kanał z autoinstall.yaml, ustala wersję przez
     `snap info`, buduje obraz Dockera (jeśli brak) i uruchamia walidator
     Subiquity w kontenerze.
+  - flash: zapisuje obraz ISO na target (urządzenie blokowe lub plik),
+    tworząc plik docelowy przez fallocate, jeśli jeszcze nie istnieje.
 """
 
 import argparse
@@ -12,6 +14,9 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+
+# Zapas miejsca dodawany przy tworzeniu pliku-targetu (na partycję z autoinstall.yaml)
+FLASH_EXTRA_BYTES = 128 * 1024 * 1024  # 128 MB
 
 
 SNAP_NAME = "ubuntu-desktop-bootstrap"
@@ -133,6 +138,93 @@ def docker_validate(tag: str, config_file: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Flash (zapis ISO na target)
+# ---------------------------------------------------------------------------
+
+def _is_block_device(path: Path) -> bool:
+    """Sprawdza czy ścieżka wskazuje na urządzenie blokowe."""
+    try:
+        return path.stat().st_mode & 0o170000 == 0o060000
+    except OSError:
+        return False
+
+
+def _is_btrfs(path: Path) -> bool:
+    """Sprawdza czy ścieżka leży na systemie plików BTRFS."""
+    result = subprocess.run(
+        ["stat", "-f", "--format=%T", str(path)],
+        capture_output=True, text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip().lower() == "btrfs"
+
+
+def flash(iso_path: Path, target: Path) -> int:
+    """Zapisuje obraz ISO na target używając dd.
+
+    Jeśli target nie istnieje i nie jest urządzeniem blokowym, tworzy
+    plik o rozmiarze ISO + FLASH_EXTRA_BYTES przez fallocate.
+    Na systemach plików BTRFS plik otrzymuje atrybut No-COW (chattr +C).
+    Po zakończeniu dd wywołuje sync.
+    """
+    # Walidacja ISO
+    if not iso_path.exists():
+        raise SystemExit(f"BŁĄD: Plik ISO nie istnieje: {iso_path}")
+    if not iso_path.is_file():
+        raise SystemExit(f"BŁĄD: Podana ścieżka ISO nie jest plikiem: {iso_path}")
+
+    iso_size = iso_path.stat().st_size
+    print(f"[autoinstall-helper] ISO: {iso_path} ({iso_size / 1024**2:.1f} MB)")
+
+    target_is_block = _is_block_device(target)
+
+    if target_is_block:
+        print(f"[autoinstall-helper] Target: urządzenie blokowe {target}")
+    elif target.exists():
+        print(f"[autoinstall-helper] Target: istniejący plik {target}")
+    else:
+        # Utwórz plik-target
+        total_size = iso_size + FLASH_EXTRA_BYTES
+        print(
+            f"[autoinstall-helper] Target nie istnieje. Tworzę plik "
+            f"{target} ({total_size / 1024**2:.1f} MB = ISO + 128 MB zapasu)..."
+        )
+
+        # Na BTRFS ustaw atrybut No-COW przed zapisem danych
+        parent = target.parent if not target.exists() else target
+        if _is_btrfs(parent):
+            print(f"[autoinstall-helper] Wykryto BTRFS — tworzę plik i ustawiam atrybut No-COW (chattr +C).")
+            # Plik musi istnieć przed chattr
+            target.touch()
+            subprocess.run(["chattr", "+C", str(target)], check=True)
+
+        subprocess.run(
+            ["fallocate", "-l", str(total_size), str(target)],
+            check=True,
+        )
+        print(f"[autoinstall-helper] Plik {target} utworzony.")
+
+    # Zapis ISO przez dd
+    print(f"[autoinstall-helper] Zapisywanie ISO na {target} (dd)... To może chwilę potrwać.")
+    dd_cmd = [
+        "dd",
+        f"if={iso_path}",
+        f"of={target}",
+        "bs=4M",
+        "status=progress",
+        "conv=fsync",
+    ]
+    result = subprocess.run(dd_cmd)
+    if result.returncode != 0:
+        raise SystemExit(f"BŁĄD: dd zakończył się kodem {result.returncode}.")
+
+    print("[autoinstall-helper] Synchronizacja buforów (sync)...")
+    subprocess.run(["sync"], check=True)
+
+    print(f"[autoinstall-helper] Flash zakończony pomyślnie: {iso_path} → {target}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Główna logika
 # ---------------------------------------------------------------------------
 
@@ -178,10 +270,25 @@ def main() -> int:
         type=Path,
         help="Waliduje podany plik autoinstall.yaml",
     )
+    parser.add_argument(
+        "--flash",
+        nargs=2,
+        metavar=("ISO", "TARGET"),
+        help=(
+            "Zapisuje obraz ISO na TARGET (urządzenie blokowe np. /dev/sdb "
+            "lub plik udający pendrive). Jeśli TARGET nie istnieje, zostanie "
+            "utworzony przez fallocate (rozmiar ISO + 128 MB). "
+            "Na systemach BTRFS plik otrzyma atrybut No-COW."
+        ),
+    )
     args = parser.parse_args()
 
     if args.validate:
         return validate(args.validate)
+
+    if args.flash:
+        iso_path, target = Path(args.flash[0]), Path(args.flash[1])
+        return flash(iso_path, target)
 
     parser.print_help()
     return 0
