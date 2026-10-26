@@ -53,7 +53,8 @@ def extract_installer_channel(config_file: Path) -> str:
 def has_cloud_config_header(config_file: Path) -> bool:
     """Sprawdza czy plik zaczyna się od '#cloud-config'."""
     try:
-        return config_file.open().readline().strip() == "#cloud-config"
+        with config_file.open() as f:
+            return f.readline().strip() == "#cloud-config"
     except OSError:
         return False
 
@@ -87,7 +88,7 @@ def get_base_image(version: str) -> str:
 
     url = f"https://raw.githubusercontent.com/canonical/subiquity/{version}/snap/snapcraft.yaml"
     print(f"[autoinstall-helper] Pobieranie snapcraft.yaml z {url}...")
-    with urllib.request.urlopen(url) as resp:
+    with urllib.request.urlopen(url, timeout=30) as resp:
         content = resp.read().decode("utf-8")
 
     base = yaml.safe_load(content).get("base", "")
@@ -196,8 +197,7 @@ def flash(iso_path: Path, target: Path) -> int:
         )
 
         # Na BTRFS ustaw atrybut No-COW przed zapisem danych
-        parent = target.parent if not target.exists() else target
-        if _is_btrfs(parent):
+        if _is_btrfs(target.parent):
             print(f"[autoinstall-helper] Wykryto BTRFS — tworzę plik i ustawiam atrybut No-COW (chattr +C).")
             # Plik musi istnieć przed chattr
             target.touch()
@@ -277,11 +277,6 @@ def _find_cidata_partition(disk: str) -> str | None:
     Zwraca ścieżkę partycji (np. /dev/loop46p4) lub None.
     Używa 'blkid' do sprawdzenia etykiet wszystkich partycji.
     """
-    result = subprocess.run(
-        ["blkid", "-o", "device", disk],
-        capture_output=True, text=True, check=False,
-    )
-    # blkid bez partycji — szukamy po wzorcu disk + 'p' lub cyfra
     # Pobieramy listę partycji przez lsblk
     lsblk = subprocess.run(
         ["lsblk", "-ln", "-o", "NAME,LABEL", disk],
@@ -311,8 +306,6 @@ def _get_last_partition_end(disk: str) -> str:
             # Format: "Numer  Początek  Koniec  ..."
             tokens = stripped.split()
             if len(tokens) >= 3:
-                last_end = tokens[2].rstrip("MB").rstrip("B").strip()
-                # usuń jednostkę: wartość może być "6482MB" lub "6482"
                 last_end = tokens[2]
     if last_end is None:
         raise SystemExit("BŁĄD: Nie można ustalić końca ostatniej partycji (parted print).")
@@ -363,7 +356,7 @@ def _find_last_partition(disk: str) -> str | None:
     parts = []
     for line in lsblk.stdout.splitlines():
         name = line.strip()
-        if name and name != disk.lstrip("/dev/"):
+        if name and name != disk.removeprefix("/dev/"):
             parts.append(f"/dev/{name}")
     return parts[-1] if parts else None
 
@@ -392,7 +385,7 @@ def import_autoinstall(yaml_path: Path, target: Path) -> int:
         raise SystemExit(f"BŁĄD: Plik YAML nie istnieje: {yaml_path}")
     if not yaml_path.is_file():
         raise SystemExit(f"BŁĄD: Podana ścieżka nie jest plikiem: {yaml_path}")
-    if not target.exists() and not _is_block_device(target):
+    if not target.exists():
         raise SystemExit(f"BŁĄD: Target nie istnieje: {target}")
 
     is_image_file = target.is_file() and not _is_block_device(target)
@@ -431,7 +424,7 @@ def export_autoinstall(target: Path, yaml_path: Path) -> int:
 
     Obsługuje zarówno plik-obraz (przez losetup) jak i urządzenie blokowe.
     """
-    if not target.exists() and not _is_block_device(target):
+    if not target.exists():
         raise SystemExit(f"BŁĄD: Target nie istnieje: {target}")
     if yaml_path.exists() and yaml_path.is_dir():
         raise SystemExit(f"BŁĄD: Podana ścieżka wyjściowa jest katalogiem: {yaml_path}")
@@ -480,7 +473,7 @@ def validate(config_file: Path) -> int:
     if not config_file.exists():
         raise SystemExit(f"BŁĄD: Plik nie istnieje: {config_file}")
 
-    dockerfile = Path(__file__).resolve().parent / "Dockerfile"
+    dockerfile = Path(__file__).resolve().parent / "docker" / "Dockerfile"
     if not dockerfile.exists():
         raise SystemExit(f"BŁĄD: Nie znaleziono Dockerfile w {dockerfile.parent}")
 

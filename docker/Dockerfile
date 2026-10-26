@@ -30,9 +30,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Subiquity dry-run timezone validation helper
-RUN mkdir -p /run/systemd/system && \
-    printf '#!/bin/sh\nif [ "$1" = "list-timezones" ]; then\n    find -L /usr/share/zoneinfo -type f -not -name "*.tab" -not -name "*.list" -not -name "*.zi" | sed "s|^/usr/share/zoneinfo/||" | sort\n    exit 0\nfi\nexit 0\n' > /usr/local/bin/timedatectl && \
-    chmod +x /usr/local/bin/timedatectl
+RUN mkdir -p /run/systemd/system
+COPY timedatectl.sh /usr/local/bin/timedatectl
+RUN chmod +x /usr/local/bin/timedatectl
 
 WORKDIR /subiquity
 
