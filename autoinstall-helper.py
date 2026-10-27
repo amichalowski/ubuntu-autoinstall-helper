@@ -15,6 +15,7 @@ Dostępne komendy:
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import platform
@@ -193,6 +194,19 @@ def docker_image_exists(tag: str) -> bool:
     return res.returncode == 0
 
 
+def docker_image_tag(version: str, dockerfile: Path) -> str:
+    """Include local validation assets in the image tag to avoid stale images."""
+    digest = hashlib.sha256()
+    for path in (
+        dockerfile,
+        dockerfile.parent / "timedatectl.sh",
+        dockerfile.parent / "validate-autoinstall.py",
+    ):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return f"{DOCKER_IMAGE_REPO}:{version}-{digest.hexdigest()[:12]}"
+
+
 def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> None:
     print(f"[autoinstall-helper] Budowanie obrazu '{tag}' (base: {base_image})...")
     subprocess.run(
@@ -209,14 +223,15 @@ def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> N
     print(f"[autoinstall-helper] Obraz '{tag}' zbudowany.")
 
 
-def docker_validate(tag: str, config_file: Path) -> int:
+def docker_validate(tag: str, config_file: Path, validation: str) -> int:
     container_path = "/data/autoinstall.yaml"
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{config_file.resolve()}:{container_path}:ro",
         tag,
-        "python3", "scripts/validate-autoinstall-user-data.py",
+        "python3", "scripts/validate-autoinstall.py",
         container_path,
+        "--validation", validation,
     ]
     if not has_cloud_config_header(config_file):
         cmd.append("--no-expect-cloudconfig")
@@ -699,7 +714,7 @@ def _read_cidata(mount_point: Path, yaml_path: Path) -> None:
 # Główna logika
 # ---------------------------------------------------------------------------
 
-def validate(config_file: Path) -> int:
+def validate(config_file: Path, validation: str = "full") -> int:
     if not config_file.exists():
         raise SystemExit(f"BŁĄD: Plik nie istnieje: {config_file}")
 
@@ -714,7 +729,7 @@ def validate(config_file: Path) -> int:
     version = get_snap_version(channel)
     print(f"[autoinstall-helper] Wersja instalatora: {version}")
 
-    tag = f"{DOCKER_IMAGE_REPO}:{version}"
+    tag = docker_image_tag(version, dockerfile)
     if docker_image_exists(tag):
         print(f"[autoinstall-helper] Obraz '{tag}' już istnieje.")
     else:
@@ -722,7 +737,7 @@ def validate(config_file: Path) -> int:
         print(f"[autoinstall-helper] Obraz bazowy: {base_image}")
         docker_build(tag, version, base_image, dockerfile)
 
-    rc = docker_validate(tag, config_file)
+    rc = docker_validate(tag, config_file, validation)
     if rc == 0:
         print("[autoinstall-helper] Walidacja zakończona sukcesem!")
     else:
@@ -748,6 +763,15 @@ def main() -> int:
         type=Path,
         default=Path("autoinstall.yaml"),
         help="Ścieżka do pliku YAML (domyślnie: autoinstall.yaml)",
+    )
+    p_val.add_argument(
+        "--validation",
+        choices=("autoinstall", "storage", "full"),
+        default="full",
+        help=(
+            "Zakres walidacji: autoinstall (Subiquity), storage (akcje storage + "
+            "Curtin schema), full (oba sprawdzenia; domyślnie)"
+        ),
     )
 
     # flash
@@ -827,7 +851,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.subcommand == "validate":
-        return validate(args.config)
+        return validate(args.config, validation=args.validation)
 
     if args.subcommand == "flash":
         if _is_block_device(args.target):

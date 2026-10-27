@@ -41,4 +41,6 @@ RUN git clone --depth 1 --branch ${SUBIQUITY_VERSION} https://github.com/canonic
     ./scripts/update-part.py probert && \
     rm -rf .git curtin/.git probert/.git
 
-CMD ["python3", "scripts/validate-autoinstall-user-data.py"]
+COPY validate-autoinstall.py /subiquity/scripts/validate-autoinstall.py
+
+CMD ["python3", "scripts/validate-autoinstall.py"]
