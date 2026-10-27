@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
 """Narzędzie do zarządzania plikiem autoinstall.yaml.
 
-Aktualnie zaimplementowana funkcjonalność:
-  - walidacja: odczytuje kanał z autoinstall.yaml, ustala wersję przez
+Dostępne komendy:
+  - validate: odczytuje kanał z autoinstall.yaml, ustala wersję przez
     `snap info`, buduje obraz Dockera (jeśli brak) i uruchamia walidator
     Subiquity w kontenerze.
   - flash: zapisuje obraz ISO na target (urządzenie blokowe lub plik),
     tworząc plik docelowy przez fallocate, jeśli jeszcze nie istnieje.
-  - import: osadza autoinstall.yaml w partycji 'cidata' (FAT32) na targecie
+  - inject: osadza autoinstall.yaml w partycji 'cidata' (FAT32) na targecie
     (urządzeniu blokowym lub pliku-obrazie). Jeśli partycja nie istnieje,
     tworzy ją na końcu dostępnego miejsca.
+  - extract: odczytuje user-data z partycji 'cidata' na targecie i zapisuje do pliku.
 """
 
 import argparse
 import contextlib
+import json
+import os
+import platform
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -57,6 +63,21 @@ def has_cloud_config_header(config_file: Path) -> bool:
             return f.readline().strip() == "#cloud-config"
     except OSError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Uprawnienia i walidacja środowiska
+# ---------------------------------------------------------------------------
+
+def _require_root(action: str) -> None:
+    """Sprawdza czy proces posiada uprawnienia roota; jeśli nie, kończy z czytelnym komunikatem."""
+    if os.geteuid() != 0:
+        cmd_args = " ".join(sys.argv)
+        raise SystemExit(
+            f"BŁĄD: Operacja '{action}' wymaga uprawnień administratora (root).\n"
+            f"Uruchom ponownie z sudo:\n"
+            f"  sudo {sys.executable} {cmd_args}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +186,7 @@ def _is_btrfs(path: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip().lower() == "btrfs"
 
 
-def flash(iso_path: Path, target: Path) -> int:
+def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
     """Zapisuje obraz ISO na target używając dd.
 
     Jeśli target nie istnieje i nie jest urządzeniem blokowym, tworzy
@@ -186,6 +207,19 @@ def flash(iso_path: Path, target: Path) -> int:
 
     if target_is_block:
         print(f"[autoinstall-helper] Target: urządzenie blokowe {target}")
+        if not yes:
+            if sys.stdin.isatty():
+                confirm = input(
+                    f"[autoinstall-helper] OSTRZEŻENIE: Cel '{target}' jest urządzeniem blokowym!\n"
+                    f"Wszystkie dane na {target} zostaną bezpowrotnie utracone. Kontynuować? [y/N]: "
+                ).strip().lower()
+                if confirm not in ("y", "yes", "t", "tak"):
+                    print("[autoinstall-helper] Anulowano przez użytkownika.")
+                    return 1
+            else:
+                raise SystemExit(
+                    f"BŁĄD: Zapis na urządzenie blokowe {target} w trybie nieinteraktywnym wymaga flagi -y / --yes."
+                )
     elif target.exists():
         print(f"[autoinstall-helper] Target: istniejący plik {target}")
     else:
@@ -376,7 +410,7 @@ def _mount_context(partition: str):
         print(f"[autoinstall-helper] Odmontowano i usunięto katalog {mount_point}.")
 
 
-def import_autoinstall(yaml_path: Path, target: Path) -> int:
+def inject(target: Path, yaml_path: Path) -> int:
     """Osadza autoinstall.yaml w partycji cidata (FAT32) na targecie.
 
     Obsługuje zarówno plik-obraz (przez losetup) jak i urządzenie blokowe.
@@ -407,6 +441,10 @@ def import_autoinstall(yaml_path: Path, target: Path) -> int:
     return 0
 
 
+# Alias wstecznej kompatybilności
+import_autoinstall = inject
+
+
 def _write_cidata(yaml_path: Path, mount_point: Path) -> None:
     """Kopiuje autoinstall.yaml jako user-data i tworzy pusty meta-data."""
     user_data = mount_point / "user-data"
@@ -419,7 +457,7 @@ def _write_cidata(yaml_path: Path, mount_point: Path) -> None:
     print(f"[autoinstall-helper] Utworzono pusty plik: {meta_data}")
 
 
-def export_autoinstall(target: Path, yaml_path: Path) -> int:
+def extract(target: Path, yaml_path: Path) -> int:
     """Odczytuje user-data z partycji cidata (FAT32) na targecie i zapisuje do pliku.
 
     Obsługuje zarówno plik-obraz (przez losetup) jak i urządzenie blokowe.
@@ -452,6 +490,10 @@ def export_autoinstall(target: Path, yaml_path: Path) -> int:
 
     print(f"[autoinstall-helper] Export zakończony pomyślnie: {target} (cidata) → {yaml_path}")
     return 0
+
+
+# Alias wstecznej kompatybilności
+export_autoinstall = extract
 
 
 def _read_cidata(mount_point: Path, yaml_path: Path) -> None:
@@ -503,63 +545,124 @@ def validate(config_file: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="autoinstall-helper.py",
-        description="Narzędzie do zarządzania plikiem autoinstall.yaml.",
+        description="Narzędzie do zarządzania konfiguracją autoinstall i nośnikami instalacyjnymi Ubuntu.",
     )
-    parser.add_argument(
-        "-v", "--validate",
-        metavar="PLIK_YAML",
+    subparsers = parser.add_subparsers(dest="subcommand", metavar="KOMENDA")
+
+    # validate
+    p_val = subparsers.add_parser(
+        "validate",
+        help="Waliduje plik autoinstall.yaml w kontenerze Docker",
+    )
+    p_val.add_argument(
+        "config",
+        nargs="?",
         type=Path,
-        help="Waliduje podany plik autoinstall.yaml",
+        default=Path("autoinstall.yaml"),
+        help="Ścieżka do pliku YAML (domyślnie: autoinstall.yaml)",
     )
-    parser.add_argument(
-        "--flash",
-        nargs=2,
-        metavar=("ISO", "TARGET"),
-        help=(
-            "Zapisuje obraz ISO na TARGET (urządzenie blokowe np. /dev/sdb "
-            "lub plik udający pendrive). Jeśli TARGET nie istnieje, zostanie "
-            "utworzony przez fallocate (rozmiar ISO + 128 MB). "
-            "Na systemach BTRFS plik otrzyma atrybut No-COW."
-        ),
+
+    # flash
+    p_flash = subparsers.add_parser(
+        "flash",
+        help="Zapisuje obraz ISO na target (urządzenie blokowe lub plik-obraz)",
     )
-    parser.add_argument(
-        "--import",
-        nargs=2,
-        metavar=("YAML", "TARGET"),
-        dest="import_autoinstall",
-        help=(
-            "Osadza YAML jako autoinstall (user-data) w partycji FAT32 "
-            "z etykietą 'cidata' na TARGET (urządzenie blokowe lub plik-obraz). "
-            "Jeśli partycja 'cidata' nie istnieje, zostanie utworzona na końcu "
-            "wolnego miejsca. Istniejące user-data jest nadpisywane."
-        ),
+    p_flash.add_argument("iso", type=Path, help="Ścieżka do pliku ISO")
+    p_flash.add_argument(
+        "target",
+        type=Path,
+        help="Urządzenie blokowe (np. /dev/sdb) lub plik-obraz",
     )
-    parser.add_argument(
-        "--export",
-        nargs=2,
-        metavar=("TARGET", "YAML"),
-        help=(
-            "Odczytuje user-data z partycji 'cidata' na TARGET (urządzenie "
-            "blokowe lub plik-obraz) i zapisuje do pliku YAML. "
-            "Błąd jeśli partycja 'cidata' lub plik user-data nie istnieje."
-        ),
+    p_flash.add_argument(
+        "-y", "--yes",
+        action="store_true",
+        help="Pomiń potwierdzenie zapisu na urządzenie blokowe",
     )
+
+    # inject (alias: import)
+    p_inject = subparsers.add_parser(
+        "inject",
+        aliases=["import"],
+        help="Osadza YAML w partycji cidata (FAT32) na targecie",
+    )
+    p_inject.add_argument("target", type=Path, help="Target (urządzenie blokowe lub plik-obraz)")
+    p_inject.add_argument(
+        "config",
+        nargs="?",
+        type=Path,
+        default=Path("autoinstall.yaml"),
+        help="Ścieżka do pliku YAML (domyślnie: autoinstall.yaml)",
+    )
+
+    # extract (alias: export)
+    p_extract = subparsers.add_parser(
+        "extract",
+        aliases=["export"],
+        help="Odczytuje user-data z partycji cidata (FAT32) na targecie",
+    )
+    p_extract.add_argument("target", type=Path, help="Target (urządzenie blokowe lub plik-obraz)")
+    p_extract.add_argument(
+        "output",
+        nargs="?",
+        type=Path,
+        default=Path("autoinstall.yaml"),
+        help="Ścieżka do pliku wyjściowego (domyślnie: autoinstall.yaml)",
+    )
+
+    # cidata group (cidata inject / cidata extract)
+    p_cidata = subparsers.add_parser(
+        "cidata",
+        help="Zarządzanie partycją cidata (podkomendy: inject, extract)",
+    )
+    cidata_sub = p_cidata.add_subparsers(dest="cidata_subcommand", metavar="AKCJA")
+
+    c_inject = cidata_sub.add_parser("inject", help="Osadza YAML w partycji cidata")
+    c_inject.add_argument("target", type=Path, help="Target (urządzenie blokowe lub plik-obraz)")
+    c_inject.add_argument(
+        "config",
+        nargs="?",
+        type=Path,
+        default=Path("autoinstall.yaml"),
+        help="Ścieżka do pliku YAML (domyślnie: autoinstall.yaml)",
+    )
+
+    c_extract = cidata_sub.add_parser("extract", help="Odczytuje user-data z partycji cidata")
+    c_extract.add_argument("target", type=Path, help="Target (urządzenie blokowe lub plik-obraz)")
+    c_extract.add_argument(
+        "output",
+        nargs="?",
+        type=Path,
+        default=Path("autoinstall.yaml"),
+        help="Ścieżka do pliku wyjściowego (domyślnie: autoinstall.yaml)",
+    )
+
     args = parser.parse_args()
 
-    if args.validate:
-        return validate(args.validate)
+    if args.subcommand == "validate":
+        return validate(args.config)
 
-    if args.flash:
-        iso_path, target = Path(args.flash[0]), Path(args.flash[1])
-        return flash(iso_path, target)
+    if args.subcommand == "flash":
+        if _is_block_device(args.target):
+            _require_root("flash na urządzenie blokowe")
+        return flash(args.iso, args.target, yes=args.yes)
 
-    if args.import_autoinstall:
-        yaml_path, target = Path(args.import_autoinstall[0]), Path(args.import_autoinstall[1])
-        return import_autoinstall(yaml_path, target)
+    if args.subcommand in ("inject", "import"):
+        _require_root("inject")
+        return inject(args.target, args.config)
 
-    if args.export:
-        target, yaml_path = Path(args.export[0]), Path(args.export[1])
-        return export_autoinstall(target, yaml_path)
+    if args.subcommand in ("extract", "export"):
+        _require_root("extract")
+        return extract(args.target, args.output)
+
+    if args.subcommand == "cidata":
+        if args.cidata_subcommand == "inject":
+            _require_root("cidata inject")
+            return inject(args.target, args.config)
+        if args.cidata_subcommand == "extract":
+            _require_root("cidata extract")
+            return extract(args.target, args.output)
+        p_cidata.print_help()
+        return 0
 
     parser.print_help()
     return 0
