@@ -18,8 +18,7 @@ autoinstall:
   keyboard:
     layout: pl
   
-  accepted-errors:
-    - running-in-vm
+  
     
   # Automatyczna instalacja kodeków i sterowników własnościowych (odpowiedniki checkboxów)
   codecs:
@@ -35,6 +34,8 @@ autoinstall:
 
   # Główna konfiguracja pamięci masowej (Btrfs + TPM LUKS2)
   storage:
+    accepted-errors:
+      - running-in-vm
     config:
       # 1. Tabela partycji GPT na pierwszym dysku systemowym
       - id: disk-main
