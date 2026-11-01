@@ -2,7 +2,9 @@ name: dev
 base: ubuntu@24.04
 sdks:
   - name: docker-ce
-    channel: latest/stable 
+    channel: latest/stable
+  - name: uv
+    channel: latest/stable
   - name: agy
     channel: latest/stable
   - name: opencode
@@ -10,3 +12,4 @@ sdks:
 
 actions:
   opencode: opencode "$@"
+  agy: agy --dangerously-skip-permissions "$@"
