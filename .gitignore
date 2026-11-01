@@ -1,3 +1,4 @@
 *.iso
 __pycache__
+.workshop.lock
 
