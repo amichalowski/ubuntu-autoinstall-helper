@@ -9,6 +9,13 @@ sdks:
     channel: latest/stable
   - name: opencode
     channel: latest/stable
+    plugs:
+      git-config:
+        interface: mount
+        workshop-target: /home/workshop/.config/git
+        read-only: true
+      ssh-agent:
+        interface: ssh-agent
 
 actions:
   opencode: opencode "$@"
