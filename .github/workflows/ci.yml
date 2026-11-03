@@ -65,8 +65,26 @@ jobs:
       - name: Install dependencies (uv.lock)
         run: uv sync --locked
 
-      - name: Ruff lint
-        run: uv run ruff check .
+      # Format 'github' emituje workflow commands (::error file=...,line=...),
+      # które GitHub renderuje jako inline adnotacje w widoku runu
+      - name: Ruff lint (annotations)
+        run: uv run ruff check --output-format=github .
 
       - name: Ruff format check
         run: uv run ruff format --check .
+
+      # Podsumowanie lintu w job summary (odpowiednik sekcji Tests):
+      # ✅ przy braku findings, tabela statystyk per reguła w przeciwnym razie
+      - name: Write lint summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### Ruff lint"
+            if stats=$(uv run ruff check --statistics .); then
+              echo "✅ 0 findings"
+            else
+              echo '```'
+              echo "$stats"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
