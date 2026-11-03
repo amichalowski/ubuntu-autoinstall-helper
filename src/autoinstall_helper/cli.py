@@ -14,6 +14,7 @@ Dostępne komendy:
 """
 
 import argparse
+import atexit
 import contextlib
 import hashlib
 import json
@@ -26,6 +27,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 # Zapas miejsca dodawany przy tworzeniu pliku-targetu (na partycję z autoinstall.yaml)
@@ -185,6 +187,56 @@ def get_base_image(version: str) -> str:
 # ---------------------------------------------------------------------------
 # Docker
 # ---------------------------------------------------------------------------
+
+_DOCKER_DIR_CACHE: Path | None = None
+
+
+def _get_docker_dir() -> Path:
+    """Zwraca ścieżkę do katalogu docker/.
+
+    W trybie deweloperskim (niespakowanym) zwraca istniejący katalog obok modułu.
+    W trybie zipapp (.pyz) wypakowuje zawartość katalogu docker/ do katalogu tymczasowego,
+    który jest automatycznie usuwany przy zakończeniu działania programu.
+    """
+    global _DOCKER_DIR_CACHE
+    if _DOCKER_DIR_CACHE is not None and _DOCKER_DIR_CACHE.is_dir():
+        return _DOCKER_DIR_CACHE
+
+    current_file = Path(__file__).resolve()
+    candidate = current_file.parent / "docker"
+    if candidate.is_dir() and (candidate / "Dockerfile").exists():
+        _DOCKER_DIR_CACHE = candidate
+        return candidate
+
+    archive_path: Path | None = None
+    for parent in [current_file] + list(current_file.parents):
+        try:
+            if parent.is_file() and zipfile.is_zipfile(parent):
+                archive_path = parent
+                break
+        except (OSError, ValueError):
+            continue
+
+    if archive_path is not None:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="autoinstall_helper_docker_"))
+        atexit.register(shutil.rmtree, tmp_dir, True)
+        prefix = "autoinstall_helper/docker/"
+        with zipfile.ZipFile(archive_path) as zf:
+            for member in zf.namelist():
+                if member.startswith(prefix) and not member.endswith("/"):
+                    rel_name = member[len(prefix):]
+                    target_file = tmp_dir / rel_name
+                    target_file.parent.mkdir(parents=True, exist_ok=True)
+                    target_file.write_bytes(zf.read(member))
+                    info = zf.getinfo(member)
+                    perms = (info.external_attr >> 16) & 0o777
+                    if perms:
+                        target_file.chmod(perms)
+        _DOCKER_DIR_CACHE = tmp_dir
+        return tmp_dir
+
+    raise SystemExit(f"BŁĄD: Nie znaleziono katalogu 'docker' (szukano w {candidate}).")
+
 
 def docker_image_exists(tag: str) -> bool:
     res = subprocess.run(
@@ -718,7 +770,7 @@ def validate(config_file: Path, validation: str = "full") -> int:
     if not config_file.exists():
         raise SystemExit(f"BŁĄD: Plik nie istnieje: {config_file}")
 
-    dockerfile = Path(__file__).resolve().parent / "docker" / "Dockerfile"
+    dockerfile = _get_docker_dir() / "Dockerfile"
     if not dockerfile.exists():
         raise SystemExit(f"BŁĄD: Nie znaleziono Dockerfile w {dockerfile.parent}")
 
