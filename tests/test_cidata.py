@@ -28,4 +28,3 @@ class TestParsePairs:
         assert result["NAME"] == "loop0p1"
         assert result["FSTYPE"] == "vfat"
         assert result["MOUNTPOINT"] == "/media/my mount"
-

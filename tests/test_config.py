@@ -1,7 +1,8 @@
 """Unit tests for autoinstall_helper.config."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from autoinstall_helper.config import (
     extract_installer_channel,

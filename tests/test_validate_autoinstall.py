@@ -8,11 +8,7 @@ import pytest
 
 # Dynamic load because the filename has a hyphen: validate-autoinstall.py
 _VALIDATOR_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "src"
-    / "autoinstall_helper"
-    / "docker"
-    / "validate-autoinstall.py"
+    Path(__file__).resolve().parents[1] / "src" / "autoinstall_helper" / "docker" / "validate-autoinstall.py"
 )
 _spec = importlib.util.spec_from_file_location("validate_autoinstall", _VALIDATOR_PATH)
 assert _spec and _spec.loader

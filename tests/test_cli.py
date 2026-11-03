@@ -27,6 +27,7 @@ def run(monkeypatch):
 # validate
 # ---------------------------------------------------------------------------
 
+
 def test_validate_dispatch(monkeypatch, run, tmp_path):
     config = tmp_path / "autoinstall.yaml"
     config.write_text("#cloud-config\n")
@@ -48,6 +49,7 @@ def test_validate_dispatch_default(monkeypatch, run, tmp_path):
 # ---------------------------------------------------------------------------
 # flash
 # ---------------------------------------------------------------------------
+
 
 def test_flash_on_file_no_root_required(monkeypatch, run, tmp_path):
     target = tmp_path / "out.img"
@@ -88,6 +90,7 @@ def test_flash_on_block_device_with_root(monkeypatch, run, tmp_path):
 # inject / import
 # ---------------------------------------------------------------------------
 
+
 def test_inject_requires_root(monkeypatch, run, tmp_path):
     monkeypatch.setattr(cli.os, "geteuid", lambda: 1000)
     with pytest.raises(SystemExit, match="root"):
@@ -116,6 +119,7 @@ def test_import_alias_dispatches_to_inject(monkeypatch, run, tmp_path):
 # extract / export
 # ---------------------------------------------------------------------------
 
+
 def test_extract_requires_root(monkeypatch, run, tmp_path):
     monkeypatch.setattr(cli.os, "geteuid", lambda: 1000)
     with pytest.raises(SystemExit, match="root"):
@@ -140,6 +144,7 @@ def test_export_alias_dispatches_to_extract(monkeypatch, run, tmp_path):
 # ---------------------------------------------------------------------------
 # cidata (podkomendy)
 # ---------------------------------------------------------------------------
+
 
 def test_cidata_inject_dispatch(monkeypatch, run, tmp_path):
     seen = {}
@@ -175,6 +180,7 @@ def test_cidata_without_action_prints_help(monkeypatch, run, capsys):
 # ---------------------------------------------------------------------------
 # Brak komendy
 # ---------------------------------------------------------------------------
+
 
 def test_no_subcommand_prints_help(run, capsys):
     assert run() == 0

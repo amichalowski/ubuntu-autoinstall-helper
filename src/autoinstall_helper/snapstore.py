@@ -26,10 +26,7 @@ def _get_snap_version_from_api(snap_name: str, channel: str) -> str | None:
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            channel_entries = [
-                e for e in data.get("channel-map", [])
-                if e.get("channel", {}).get("name") == channel
-            ]
+            channel_entries = [e for e in data.get("channel-map", []) if e.get("channel", {}).get("name") == channel]
             for entry in channel_entries:
                 if entry.get("channel", {}).get("architecture") == target_arch:
                     return str(entry.get("version"))
@@ -55,7 +52,9 @@ def get_snap_version(channel: str) -> str:
         try:
             result = subprocess.run(
                 ["snap", "info", SNAP_NAME],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             )
             for line in result.stdout.splitlines():
                 line = line.strip()

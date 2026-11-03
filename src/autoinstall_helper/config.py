@@ -8,15 +8,9 @@ def extract_installer_channel(config_file: Path) -> str:
     import yaml  # type: ignore[import-untyped]
 
     data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-    channel = (
-        data.get("autoinstall", {})
-            .get("refresh-installer", {})
-            .get("channel")
-    )
+    channel = data.get("autoinstall", {}).get("refresh-installer", {}).get("channel")
     if not channel:
-        raise SystemExit(
-            f"BŁĄD: Nie znaleziono pola 'autoinstall.refresh-installer.channel' w {config_file}"
-        )
+        raise SystemExit(f"BŁĄD: Nie znaleziono pola 'autoinstall.refresh-installer.channel' w {config_file}")
     return str(channel).strip()
 
 

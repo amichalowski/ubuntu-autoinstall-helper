@@ -122,7 +122,8 @@ def main() -> int:
         help="Urządzenie blokowe (np. /dev/sdb) lub plik-obraz",
     )
     p_flash.add_argument(
-        "-y", "--yes",
+        "-y",
+        "--yes",
         action="store_true",
         help="Pomiń potwierdzenie zapisu na urządzenie blokowe",
     )

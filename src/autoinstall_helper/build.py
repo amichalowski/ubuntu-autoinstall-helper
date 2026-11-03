@@ -79,7 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Buduje samodzielny plik wykonywalny autoinstall-helper.pyz (zipapp).",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=Path,
         default=Path("autoinstall-helper.pyz"),
         help="Ścieżka do wyjściowego pliku .pyz (domyślnie: autoinstall-helper.pyz)",

@@ -59,7 +59,9 @@ def _get_partitions(disk: str) -> list[str]:
     subprocess.run(["udevadm", "settle"], capture_output=True, check=False)
     res = subprocess.run(
         ["lsblk", "-np", "-o", "PATH,TYPE", disk],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     partitions = []
     for line in res.stdout.splitlines():
@@ -74,7 +76,10 @@ def _get_disk_size_and_last_end(disk: str) -> tuple[float | None, float | None]:
     env = dict(os.environ, LC_ALL="C")
     result = subprocess.run(
         ["parted", disk, "--script", "unit", "MB", "print"],
-        capture_output=True, text=True, check=False, env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
     )
     disk_size = None
     last_end = None
@@ -111,7 +116,9 @@ def _find_cidata_partition(disk: str) -> str | None:
     # 1. Sprawdzenie przez lsblk (LABEL oraz PARTLABEL)
     lsblk = subprocess.run(
         ["lsblk", "-npP", "-o", "PATH,LABEL,PARTLABEL", disk],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     for line in lsblk.stdout.splitlines():
         info = _parse_pairs(line)
@@ -126,7 +133,9 @@ def _find_cidata_partition(disk: str) -> str | None:
     for part in partitions:
         b_res = subprocess.run(
             ["blkid", "-p", "-o", "export", part],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         b_info = {}
         for b_line in b_res.stdout.splitlines():
@@ -157,8 +166,15 @@ def _get_last_partition_end(disk: str) -> str:
     """Zwraca koniec ostatniej partycji w MB (jako string do przekazania do parted)."""
     env = dict(os.environ, LC_ALL="C")
     result = _run(
-        "parted", disk, "--script", "unit", "MB", "print",
-        capture=True, check=False, env=env,
+        "parted",
+        disk,
+        "--script",
+        "unit",
+        "MB",
+        "print",
+        capture=True,
+        check=False,
+        env=env,
     )
     last_end = None
     for line in result.stdout.splitlines():
@@ -206,8 +222,14 @@ def _ensure_cidata_partition(disk: str) -> str:
     print("[autoinstall-helper] Brak partycji 'cidata' — tworzę nową na końcu dysku...")
     last_end = _get_last_partition_end(disk)
     _run(
-        "parted", disk, "--script",
-        "mkpart", CIDATA_LABEL, "fat32", last_end, "100%",
+        "parted",
+        disk,
+        "--script",
+        "mkpart",
+        CIDATA_LABEL,
+        "fat32",
+        last_end,
+        "100%",
     )
     # Wymuś ponowne odczytanie tablicy partycji przez kernel
     subprocess.run(["partprobe", disk], check=False)
@@ -227,7 +249,9 @@ def _find_last_partition(disk: str) -> str | None:
     """Zwraca ścieżkę ostatniej partycji na dysku."""
     lsblk = subprocess.run(
         ["lsblk", "-ln", "-o", "NAME", disk],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     parts = []
     for line in lsblk.stdout.splitlines():
@@ -315,18 +339,14 @@ def extract(target: Path, yaml_path: Path) -> int:
         with _loop_context(target) as loop_dev:
             part = _find_cidata_partition(loop_dev)
             if not part:
-                raise SystemExit(
-                    f"BŁĄD: Nie znaleziono partycji 'cidata' w obrazie {target}."
-                )
+                raise SystemExit(f"BŁĄD: Nie znaleziono partycji 'cidata' w obrazie {target}.")
             with _mount_context(part) as mnt:
                 _read_cidata(mnt, yaml_path)
     else:
         disk = str(target)
         part = _find_cidata_partition(disk)
         if not part:
-            raise SystemExit(
-                f"BŁĄD: Nie znaleziono partycji 'cidata' na urządzeniu {target}."
-            )
+            raise SystemExit(f"BŁĄD: Nie znaleziono partycji 'cidata' na urządzeniu {target}.")
         with _mount_context(part) as mnt:
             _read_cidata(mnt, yaml_path)
 
@@ -342,8 +362,6 @@ def _read_cidata(mount_point: Path, yaml_path: Path) -> None:
     """Kopiuje user-data z zamontowanej partycji cidata do pliku wyjściowego."""
     user_data = mount_point / "user-data"
     if not user_data.exists():
-        raise SystemExit(
-            f"BŁĄD: Brak pliku 'user-data' na partycji cidata (szukano w {user_data})."
-        )
+        raise SystemExit(f"BŁĄD: Brak pliku 'user-data' na partycji cidata (szukano w {user_data}).")
     shutil.copy2(user_data, yaml_path)
     print(f"[autoinstall-helper] Skopiowano user-data → {yaml_path}")

@@ -13,18 +13,13 @@ from typing import Any
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CURTIN_ROOT = ROOT / "curtin"
-SUBIQUITY_VALIDATOR_PATH = Path(__file__).with_name(
-    "validate-autoinstall-user-data.py"
-)
+SUBIQUITY_VALIDATOR_PATH = Path(__file__).with_name("validate-autoinstall-user-data.py")
 
 
 def load_subiquity_validator():
-    spec = importlib.util.spec_from_file_location(
-        "subiquity_user_data_validator", SUBIQUITY_VALIDATOR_PATH
-    )
+    spec = importlib.util.spec_from_file_location("subiquity_user_data_validator", SUBIQUITY_VALIDATOR_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not load Subiquity's autoinstall validator")
     module = importlib.util.module_from_spec(spec)
@@ -68,8 +63,7 @@ def validate_storage_structure(ai_data: dict[str, Any]) -> list[str]:
             errors.append(f"{prefix}.id must be a non-empty string")
         elif action_id in seen:
             errors.append(
-                f"Duplicate storage action id {action_id!r} at {prefix} "
-                f"(first declared at index {seen[action_id]})"
+                f"Duplicate storage action id {action_id!r} at {prefix} (first declared at index {seen[action_id]})"
             )
         else:
             seen[action_id] = index
@@ -132,9 +126,7 @@ def curtin_storage_input(ai_data: dict[str, Any]) -> dict[str, Any] | None:
     return {"storage": {"version": 1, "config": actions}}
 
 
-async def validate(
-    ai_data: dict[str, Any], mode: str, verbosity: int, validator
-) -> int:
+async def validate(ai_data: dict[str, Any], mode: str, verbosity: int, validator) -> int:
     check_storage = mode in ("storage", "full")
     structural_errors = validate_storage_structure(ai_data) if check_storage else []
 
@@ -171,9 +163,7 @@ async def validate(
             return 0
 
         curtin_config_path = Path(td) / "curtin-storage.yaml"
-        curtin_config_path.write_text(
-            yaml.safe_dump(rendered), encoding="utf-8"
-        )
+        curtin_config_path.write_text(yaml.safe_dump(rendered), encoding="utf-8")
         command = [
             str(CURTIN_ROOT / "bin" / "curtin"),
             "schema-validate",
@@ -183,8 +173,12 @@ async def validate(
         ]
         print("[storage] Running Curtin schema validation...")
         result = subprocess.run(
-            command, cwd=ROOT, check=False, text=True,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            command,
+            cwd=ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
         if result.stdout:
             print(result.stdout, end="")
@@ -219,9 +213,7 @@ def main() -> int:
     args = parse_args()
     validator = load_subiquity_validator()
     try:
-        ai_data = validator.parse_autoinstall(
-            args.input.read(), args.expect_cloudconfig
-        )
+        ai_data = validator.parse_autoinstall(args.input.read(), args.expect_cloudconfig)
         if not isinstance(ai_data, dict):
             raise ValueError("autoinstall data must be a mapping")
     except Exception as exc:
@@ -229,9 +221,7 @@ def main() -> int:
         return 1
 
     try:
-        return asyncio.run(
-            validate(ai_data, args.validation, args.verbosity, validator)
-        )
+        return asyncio.run(validate(ai_data, args.validation, args.verbosity, validator))
     except Exception as exc:
         print(f"Validation failed: {exc}", file=sys.stderr)
         return 1

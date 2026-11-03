@@ -48,7 +48,7 @@ def _get_docker_dir() -> Path:
         with zipfile.ZipFile(archive_path) as zf:
             for member in zf.namelist():
                 if member.startswith(prefix) and not member.endswith("/"):
-                    rel_name = member[len(prefix):]
+                    rel_name = member[len(prefix) :]
                     target_file = tmp_dir / rel_name
                     target_file.parent.mkdir(parents=True, exist_ok=True)
                     target_file.write_bytes(zf.read(member))
@@ -149,11 +149,16 @@ def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> N
     print(f"[autoinstall-helper] Budowanie obrazu '{tag}' (base: {base_image})...")
     subprocess.run(
         [
-            "docker", "build",
-            "--build-arg", f"SUBIQUITY_VERSION={version}",
-            "--build-arg", f"BASE_IMAGE={base_image}",
-            "-t", tag,
-            "-f", str(dockerfile),
+            "docker",
+            "build",
+            "--build-arg",
+            f"SUBIQUITY_VERSION={version}",
+            "--build-arg",
+            f"BASE_IMAGE={base_image}",
+            "-t",
+            tag,
+            "-f",
+            str(dockerfile),
             str(dockerfile.parent),
         ],
         check=True,
@@ -164,12 +169,17 @@ def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> N
 def docker_validate(tag: str, config_file: Path, validation: str) -> int:
     container_path = "/data/autoinstall.yaml"
     cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{config_file.resolve()}:{container_path}:ro",
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{config_file.resolve()}:{container_path}:ro",
         tag,
-        "python3", "scripts/validate-autoinstall.py",
+        "python3",
+        "scripts/validate-autoinstall.py",
         container_path,
-        "--validation", validation,
+        "--validation",
+        validation,
     ]
     if not has_cloud_config_header(config_file):
         cmd.append("--no-expect-cloudconfig")

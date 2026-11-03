@@ -14,7 +14,8 @@ def _is_btrfs(path: Path) -> bool:
     """Sprawdza czy ścieżka leży na systemie plików BTRFS."""
     result = subprocess.run(
         ["stat", "-f", "--format=%T", str(path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0 and result.stdout.strip().lower() == "btrfs"
 
@@ -42,10 +43,14 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
         print(f"[autoinstall-helper] Target: urządzenie blokowe {target}")
         if not yes:
             if sys.stdin.isatty():
-                confirm = input(
-                    f"[autoinstall-helper] OSTRZEŻENIE: Cel '{target}' jest urządzeniem blokowym!\n"
-                    f"Wszystkie dane na {target} zostaną bezpowrotnie utracone. Kontynuować? [y/N]: "
-                ).strip().lower()
+                confirm = (
+                    input(
+                        f"[autoinstall-helper] OSTRZEŻENIE: Cel '{target}' jest urządzeniem blokowym!\n"
+                        f"Wszystkie dane na {target} zostaną bezpowrotnie utracone. Kontynuować? [y/N]: "
+                    )
+                    .strip()
+                    .lower()
+                )
                 if confirm not in ("y", "yes", "t", "tak"):
                     print("[autoinstall-helper] Anulowano przez użytkownika.")
                     return 1
@@ -74,7 +79,7 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
 
         # Na BTRFS ustaw atrybut No-COW przed zapisem danych
         if _is_btrfs(target.parent):
-            print(f"[autoinstall-helper] Wykryto BTRFS — tworzę plik i ustawiam atrybut No-COW (chattr +C).")
+            print("[autoinstall-helper] Wykryto BTRFS — tworzę plik i ustawiam atrybut No-COW (chattr +C).")
             # Plik musi istnieć przed chattr
             target.touch()
             subprocess.run(["chattr", "+C", str(target)], check=True)
