@@ -150,14 +150,13 @@ def _find_cidata_partition(disk: str) -> str | None:
     # 3. Jeśli istnieje już partycja dodatkowa (> 3) i sięga końca dysku (brak miejsca na nową)
     if len(partitions) > 3:
         disk_size, last_end = _get_disk_size_and_last_end(disk)
-        if disk_size is not None and last_end is not None:
-            if (disk_size - last_end) < 10.0:
-                last_part = partitions[-1]
-                print(
-                    f"[autoinstall-helper] Znaleziono istniejącą partycję końcową {last_part} "
-                    f"zajmującą całą wolną przestrzeń ({last_end:.0f}MB / {disk_size:.0f}MB) — przyjęto jako cidata."
-                )
-                return last_part
+        if disk_size is not None and last_end is not None and (disk_size - last_end) < 10.0:
+            last_part = partitions[-1]
+            print(
+                f"[autoinstall-helper] Znaleziono istniejącą partycję końcową {last_part} "
+                f"zajmującą całą wolną przestrzeń ({last_end:.0f}MB / {disk_size:.0f}MB) — przyjęto jako cidata."
+            )
+            return last_part
 
     return None
 

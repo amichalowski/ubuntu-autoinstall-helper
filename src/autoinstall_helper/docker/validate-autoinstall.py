@@ -215,7 +215,7 @@ def main() -> int:
     try:
         ai_data = validator.parse_autoinstall(args.input.read(), args.expect_cloudconfig)
         if not isinstance(ai_data, dict):
-            raise ValueError("autoinstall data must be a mapping")
+            raise TypeError("autoinstall data must be a mapping")
     except Exception as exc:
         print(f"FAILURE: {exc}", file=sys.stderr)
         return 1

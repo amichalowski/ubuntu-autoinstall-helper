@@ -1,0 +1,7 @@
+# https://git-scm.com/docs/git-blame#Documentation/git-blame.txt---ignore-revs-fileltfilegt
+# Mass-formatted commits listed here are skipped by:
+#   git blame --ignore-revs-file .git-blame-ignore-revs
+# (set permanently with: git config blame.ignoreRevsFile .git-blame-ignore-revs)
+
+# style: apply ruff format and auto-fixes (12 files, zero semantic changes)
+bf7dfb561d938d40fc0d56f78a2fbc50e28a1141

@@ -16,6 +16,7 @@ def _is_btrfs(path: Path) -> bool:
         ["stat", "-f", "--format=%T", str(path)],
         capture_output=True,
         text=True,
+        check=False,
     )
     return result.returncode == 0 and result.stdout.strip().lower() == "btrfs"
 
@@ -100,7 +101,7 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
         "status=progress",
         "conv=notrunc,fsync",
     ]
-    result = subprocess.run(dd_cmd)
+    result = subprocess.run(dd_cmd, check=False)
     if result.returncode != 0:
         raise SystemExit(f"BŁĄD: dd zakończył się kodem {result.returncode}.")
 

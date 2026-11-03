@@ -49,6 +49,7 @@ class TestBuildZipapp:
             [sys.executable, str(target_pyz), "--help"],
             capture_output=True,
             text=True,
+            check=False,
         )
         assert proc.returncode == 0
         assert "autoinstall-helper" in proc.stdout

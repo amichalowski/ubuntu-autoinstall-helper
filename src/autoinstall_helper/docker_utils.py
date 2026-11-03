@@ -66,6 +66,7 @@ def docker_image_exists(tag: str) -> bool:
     res = subprocess.run(
         ["docker", "image", "inspect", tag],
         capture_output=True,
+        check=False,
     )
     return res.returncode == 0
 
@@ -185,5 +186,5 @@ def docker_validate(tag: str, config_file: Path, validation: str) -> int:
         cmd.append("--no-expect-cloudconfig")
 
     print(f"[autoinstall-helper] Walidacja '{config_file.name}' w kontenerze '{tag}'...")
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, check=False)
     return result.returncode
