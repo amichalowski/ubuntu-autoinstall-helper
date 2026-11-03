@@ -21,3 +21,9 @@ Repository guidelines for AI agents working on **autoinstall-helper**.
 - Mock at the point of **usage** (e.g., `autoinstall_helper.flash.subprocess.run`), not definition.
 - Use pytest's built-in `tmp_path` fixture for any file/directory I/O tests.
 - Never perform real block device operations, network calls, or Docker invocations during unit tests—mock system boundaries (`subprocess.run`, `urllib.request.urlopen`, `losetup`, `parted`).
+
+## Lint & Formatting
+
+- Run `uv run ruff check .` and `uv run ruff format --check .` before committing. CI (`.github/workflows/ci.yml`, `lint` job) enforces the same commands and fails otherwise.
+- Ruff version is pinned via `uv.lock`, so local hooks, developers, and CI always use the identical version.
+- Broad `except Exception` in CLI entry points and the Snap Store API fallback is an accepted pattern (`BLE001` globally ignored). Blocking `subprocess.run` calls must state intent explicitly: `check=True` or `check=False`.

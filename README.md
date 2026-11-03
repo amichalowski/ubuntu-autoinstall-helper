@@ -1,6 +1,8 @@
 # Ubuntu Autoinstall Helper & Validator
 
+[![CI](https://github.com/amichalowski/ubuntu-autoinstall-helper/actions/workflows/ci.yml/badge.svg)](https://github.com/amichalowski/ubuntu-autoinstall-helper/actions/workflows/ci.yml)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://conventionalcommits.org)
+[![Linted & Formatted with Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 > [!NOTE]
 > **Project Background & Vibecoding Disclaimer**  
@@ -51,7 +53,9 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 
 ```text
 .
-├── pyproject.toml                             # Project metadata, console scripts and build config
+├── .github/workflows/ci.yml                   # GitHub Actions: pytest + ruff (tests, lint)
+├── .pre-commit-config.yaml                    # Local ruff git hooks (uv run pre-commit install)
+├── pyproject.toml                             # Project metadata, console scripts, ruff config
 ├── src/
 │   └── autoinstall_helper/
 │       ├── __init__.py
@@ -100,7 +104,22 @@ uv run autoinstall-helper validate autoinstall.yaml
 
 # Run unit tests
 uv run pytest -v
+
+# Lint & format check (ruff version pinned in uv.lock — same as CI)
+uv run ruff check .
+uv run ruff format --check .
 ```
+
+### Local pre-commit hook
+
+Ruff runs in CI (`lint` job), but you can get instant feedback on every commit by installing the local git hook:
+
+```bash
+# One-time setup per clone: activates ruff check + ruff format on staged files
+uv run pre-commit install
+```
+
+The hook delegates to `uv run ruff` (see [`.pre-commit-config.yaml`](.pre-commit-config.yaml)), so the local version is always identical to the one enforced in CI.
 
 ### Building Standalone Executable (`zipapp`)
 

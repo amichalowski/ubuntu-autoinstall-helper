@@ -1,0 +1,16 @@
+# Hooki lokalne delegujące do ruffa z dev-dependencies (wersja przypięta w uv.lock,
+# identyczna jak w CI). Instalacja jednorazowa per klon repo:
+#   uv run pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --force-exclude
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types: [python]
