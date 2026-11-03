@@ -1,6 +1,7 @@
 """Narzędzie do budowania pojedynczego pliku wykonywalnego zipapp (.pyz)."""
 
 import argparse
+import hashlib
 import stat
 import sys
 import zipapp
@@ -10,6 +11,18 @@ from pathlib import Path
 def exclude_pycache(path: Path) -> bool:
     """Wyklucza katalogi __pycache__ i skompilowane pliki .pyc z archiwum."""
     return "__pycache__" not in path.parts and not path.name.endswith(".pyc")
+
+
+def compute_docker_digest(docker_dir: Path) -> str:
+    """Oblicza 12-znakowy skrót SHA-256 z kluczowych plików katalogu docker/."""
+    digest = hashlib.sha256()
+    for name in ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py"):
+        asset = docker_dir / name
+        if not asset.exists():
+            raise FileNotFoundError(f"Brak wymaganego pliku w katalogu docker: {asset}")
+        digest.update(name.encode("utf-8"))
+        digest.update(asset.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def build_zipapp(
@@ -27,19 +40,29 @@ def build_zipapp(
 
     # Upewnij się, że katalogi pakietów zawierają __init__.py
     pkg_docker = src_path / "autoinstall_helper" / "docker"
+    digest_file: Path | None = None
     if pkg_docker.is_dir():
         (pkg_docker / "__init__.py").touch()
+        # Wylicz hash zasobów i umieść plik DOCKER_DIGEST w pakiecie, ale POZA katalogiem docker/
+        digest = compute_docker_digest(pkg_docker)
+        digest_file = src_path / "autoinstall_helper" / "DOCKER_DIGEST"
+        digest_file.write_text(digest + "\n", encoding="utf-8")
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"[build] Pakowanie {src_path} -> {target_path}...")
-    zipapp.create_archive(
-        source=src_path,
-        target=target_path,
-        interpreter="/usr/bin/env python3",
-        main="autoinstall_helper.cli:main",
-        filter=exclude_pycache,
-    )
+    try:
+        print(f"[build] Pakowanie {src_path} -> {target_path}...")
+        zipapp.create_archive(
+            source=src_path,
+            target=target_path,
+            interpreter="/usr/bin/env python3",
+            main="autoinstall_helper.cli:main",
+            filter=exclude_pycache,
+        )
+    finally:
+        # Usuń tymczasowy plik z katalogu źródłowego po spakowaniu
+        if digest_file is not None and digest_file.exists():
+            digest_file.unlink()
 
     # Nadanie uprawnień wykonywalności (+x)
     current_mode = target_path.stat().st_mode

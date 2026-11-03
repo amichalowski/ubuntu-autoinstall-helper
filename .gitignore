@@ -6,4 +6,5 @@ dist/
 *.pyz
 *.egg-info/
 .pytest_cache/
+DOCKER_DIGEST
 

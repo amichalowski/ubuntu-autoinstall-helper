@@ -246,17 +246,79 @@ def docker_image_exists(tag: str) -> bool:
     return res.returncode == 0
 
 
-def docker_image_tag(version: str, dockerfile: Path) -> str:
+_DOCKER_DIGEST_CACHE: str | None = None
+
+
+def get_docker_digest() -> str:
+    """Zwraca 12-znakowy skrót SHA-256 zasobów kontenera bez rozpakowywania na dysk.
+
+    1. W trybie zipapp odczytuje plik DOCKER_DIGEST bezpośrednio z archiwum do pamięci RAM.
+    2. W trybie deweloperskim sprawdza plik DOCKER_DIGEST obok modułu lub oblicza skrót w locie.
+    """
+    global _DOCKER_DIGEST_CACHE
+    if _DOCKER_DIGEST_CACHE is not None:
+        return _DOCKER_DIGEST_CACHE
+
+    current_file = Path(__file__).resolve()
+
+    # 1. Sprawdź czy plik DOCKER_DIGEST istnieje bezpośrednio na dysku (obok modułu)
+    digest_file = current_file.parent / "DOCKER_DIGEST"
+    if digest_file.is_file():
+        _DOCKER_DIGEST_CACHE = digest_file.read_text(encoding="utf-8").strip()
+        return _DOCKER_DIGEST_CACHE
+
+    # 2. Tryb deweloperski (katalog docker/ na dysku)
+    docker_dir = current_file.parent / "docker"
+    if docker_dir.is_dir() and (docker_dir / "Dockerfile").exists():
+        digest = hashlib.sha256()
+        for name in ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py"):
+            asset = docker_dir / name
+            digest.update(name.encode("utf-8"))
+            digest.update(asset.read_bytes())
+        _DOCKER_DIGEST_CACHE = digest.hexdigest()[:12]
+        return _DOCKER_DIGEST_CACHE
+
+    # 3. Tryb zipapp: odczytaj DOCKER_DIGEST bezpośrednio z archiwum zip bez rozpakowywania
+    for parent in [current_file] + list(current_file.parents):
+        try:
+            if parent.is_file() and zipfile.is_zipfile(parent):
+                with zipfile.ZipFile(parent) as zf:
+                    namelist = zf.namelist()
+                    if "autoinstall_helper/DOCKER_DIGEST" in namelist:
+                        _DOCKER_DIGEST_CACHE = zf.read("autoinstall_helper/DOCKER_DIGEST").decode("utf-8").strip()
+                        return _DOCKER_DIGEST_CACHE
+                    # Awaryjny fallback: policz z plików w archiwum w RAM bez tworzenia plików w tmp
+                    digest = hashlib.sha256()
+                    for name in ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py"):
+                        entry = f"autoinstall_helper/docker/{name}"
+                        if entry in namelist:
+                            digest.update(name.encode("utf-8"))
+                            digest.update(zf.read(entry))
+                    _DOCKER_DIGEST_CACHE = digest.hexdigest()[:12]
+                    return _DOCKER_DIGEST_CACHE
+        except (OSError, ValueError):
+            continue
+
+    raise SystemExit("BŁĄD: Nie można ustalić skrótu zasobów katalogu docker.")
+
+
+def docker_image_tag(version: str, digest_or_dockerfile: str | Path | None = None) -> str:
     """Include local validation assets in the image tag to avoid stale images."""
-    digest = hashlib.sha256()
-    for path in (
-        dockerfile,
-        dockerfile.parent / "timedatectl.sh",
-        dockerfile.parent / "validate-autoinstall.py",
-    ):
-        digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
-    return f"{DOCKER_IMAGE_REPO}:{version}-{digest.hexdigest()[:12]}"
+    if isinstance(digest_or_dockerfile, Path):
+        digest = hashlib.sha256()
+        for path in (
+            digest_or_dockerfile,
+            digest_or_dockerfile.parent / "timedatectl.sh",
+            digest_or_dockerfile.parent / "validate-autoinstall.py",
+        ):
+            digest.update(path.name.encode("utf-8"))
+            digest.update(path.read_bytes())
+        tag_hash = digest.hexdigest()[:12]
+    elif isinstance(digest_or_dockerfile, str):
+        tag_hash = digest_or_dockerfile
+    else:
+        tag_hash = get_docker_digest()
+    return f"{DOCKER_IMAGE_REPO}:{version}-{tag_hash}"
 
 
 def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> None:
@@ -770,10 +832,6 @@ def validate(config_file: Path, validation: str = "full") -> int:
     if not config_file.exists():
         raise SystemExit(f"BŁĄD: Plik nie istnieje: {config_file}")
 
-    dockerfile = _get_docker_dir() / "Dockerfile"
-    if not dockerfile.exists():
-        raise SystemExit(f"BŁĄD: Nie znaleziono Dockerfile w {dockerfile.parent}")
-
     print(f"[autoinstall-helper] Odczytywanie: {config_file}")
     channel = extract_installer_channel(config_file)
     print(f"[autoinstall-helper] Kanał instalatora: {channel}")
@@ -781,10 +839,13 @@ def validate(config_file: Path, validation: str = "full") -> int:
     version = get_snap_version(channel)
     print(f"[autoinstall-helper] Wersja instalatora: {version}")
 
-    tag = docker_image_tag(version, dockerfile)
+    tag = docker_image_tag(version)
     if docker_image_exists(tag):
         print(f"[autoinstall-helper] Obraz '{tag}' już istnieje.")
     else:
+        dockerfile = _get_docker_dir() / "Dockerfile"
+        if not dockerfile.exists():
+            raise SystemExit(f"BŁĄD: Nie znaleziono Dockerfile w {dockerfile.parent}")
         base_image = get_base_image(version)
         print(f"[autoinstall-helper] Obraz bazowy: {base_image}")
         docker_build(tag, version, base_image, dockerfile)
