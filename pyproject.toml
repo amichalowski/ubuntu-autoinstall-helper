@@ -16,6 +16,24 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.0.0",
     "pytest>=9.2.0",
     "pyyaml>=6.0.3",
+    "ruff>=0.17.3",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# BLE001 (blind-except): celowy wzorzec w punktach wejścia CLI (przyjazny komunikat
+# błędu + kod wyjścia 1) oraz w fallbacku sieciowym Snap Store API.
+ignore = ["BLE001"]
+
+[tool.ruff.lint.per-file-ignores]
+# Skrypt walidacyjny wykonywany wewnątrz kontenera:
+# - N999: nazwa pliku z dywizem jest celowa (referencjonowana przez Dockerfile),
+# - EXE001: shebang wykonywany wewnątrz kontenera, nie na hoście,
+# - ASYNC221: blokujące subprocess.run w pojedynczym asyncio.run() jest nieszkodliwe.
+"src/autoinstall_helper/docker/validate-autoinstall.py" = ["N999", "EXE001", "ASYNC221"]
