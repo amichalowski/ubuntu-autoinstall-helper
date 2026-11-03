@@ -12,6 +12,8 @@ concurrency:
 
 permissions:
   contents: read
+  # dorny/test-reporter tworzy Check Run z wynikami testów (adnotacje + summary).
+  checks: write
 
 jobs:
   tests:
@@ -29,7 +31,25 @@ jobs:
         run: uv sync --locked
 
       - name: Run test suite
-        run: uv run pytest -v
+        run: uv run pytest -v --junitxml=junit/test-results.xml
+
+      # dorny/test-reporter parsuje JUnit XML i publikuje natywny Check Run:
+      # adnotacje przy nieudanych testach oraz sekcję z wynikami w Summary.
+      - name: Publish test results
+        if: ${{ !cancelled() }}
+        uses: dorny/test-reporter@v3
+        with:
+          name: JUnit Tests Results
+          path: junit/test-results.xml
+          reporter: python-xunit
+
+      # Surowy JUnit XML jako artefakt do pobrania (debugging).
+      - name: Upload test results (JUnit)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-pytest
+          path: junit/test-results.xml
 
   lint:
     name: Lint (ruff)
