@@ -747,7 +747,7 @@ def validate(config_file: Path, validation: str = "full") -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="autoinstall-helper.py",
+        prog="autoinstall-helper",
         description="Narzędzie do zarządzania konfiguracją autoinstall i nośnikami instalacyjnymi Ubuntu.",
     )
     subparsers = parser.add_subparsers(dest="subcommand", metavar="KOMENDA")
