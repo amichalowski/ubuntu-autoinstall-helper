@@ -1,129 +1,184 @@
-"""Unit tests for pure functions in autoinstall_helper.cli."""
+"""Testy dla warstwy CLI (cli.py): dispatch komend i wymóg uprawnień roota.
 
-import pytest
+Mockujemy funkcje w miejscu użycia (autoinstall_helper.cli.*), nie w definicji —
+patrz AGENTS.md.
+"""
+
+import sys
 from pathlib import Path
 
-from autoinstall_helper.cli import (
-    _parse_pairs,
-    extract_installer_channel,
-    has_cloud_config_header,
-)
+import pytest
+
+from autoinstall_helper import cli
 
 
-class TestParsePairs:
-    """Tests for _parse_pairs(line) - lsblk / udev format parsing."""
+@pytest.fixture
+def run(monkeypatch):
+    """Wywołuje cli.main() z podanymi argv, zamieniając sys.argv."""
 
-    def test_typical_lsblk_output(self):
-        line = 'PATH="/dev/sda" LABEL="cidata" PARTLABEL=""'
-        expected = {
-            "PATH": "/dev/sda",
-            "LABEL": "cidata",
-            "PARTLABEL": "",
-        }
-        assert _parse_pairs(line) == expected
+    def _run(*argv):
+        monkeypatch.setattr(sys, "argv", ["autoinstall-helper", *argv])
+        return cli.main()
 
-    def test_empty_line(self):
-        assert _parse_pairs("") == {}
-
-    def test_line_without_quotes(self):
-        # Format KEY="VALUE" expects double quotes
-        assert _parse_pairs("KEY=VALUE ANOTHER=123") == {}
-
-    def test_whitespace_and_special_chars(self):
-        line = 'NAME="loop0p1" FSTYPE="vfat" MOUNTPOINT="/media/my mount"'
-        result = _parse_pairs(line)
-        assert result["NAME"] == "loop0p1"
-        assert result["FSTYPE"] == "vfat"
-        assert result["MOUNTPOINT"] == "/media/my mount"
+    return _run
 
 
-class TestHasCloudConfigHeader:
-    """Tests for has_cloud_config_header(config_file)."""
+# ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
 
-    def test_valid_cloud_config_header(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text("#cloud-config\nautoinstall:\n  version: 1\n", encoding="utf-8")
-        assert has_cloud_config_header(cfg) is True
+def test_validate_dispatch(monkeypatch, run, tmp_path):
+    config = tmp_path / "autoinstall.yaml"
+    config.write_text("#cloud-config\n")
+    seen = {}
 
-    def test_header_with_trailing_whitespace(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text("#cloud-config   \r\nautoinstall:\n  version: 1\n", encoding="utf-8")
-        assert has_cloud_config_header(cfg) is True
+    monkeypatch.setattr(cli, "validate", lambda cfg, validation: seen.update(cfg=cfg, validation=validation) or 0)
 
-    def test_missing_header(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text("autoinstall:\n  version: 1\n", encoding="utf-8")
-        assert has_cloud_config_header(cfg) is False
-
-    def test_different_comment(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text("#not-cloud-config\nautoinstall:\n  version: 1\n", encoding="utf-8")
-        assert has_cloud_config_header(cfg) is False
-
-    def test_nonexistent_file(self, tmp_path: Path):
-        cfg = tmp_path / "nonexistent.yaml"
-        assert has_cloud_config_header(cfg) is False
+    rc = run("validate", str(config), "--validation", "storage")
+    assert rc == 0
+    assert seen == {"cfg": config, "validation": "storage"}
 
 
-class TestExtractInstallerChannel:
-    """Tests for extract_installer_channel(config_file)."""
+def test_validate_dispatch_default(monkeypatch, run, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "validate", lambda cfg, validation: 0)
+    assert run("validate") == 0
 
-    def test_valid_channel(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text(
-            """
-autoinstall:
-  version: 1
-  refresh-installer:
-    update: true
-    channel: 24.04/stable
-""",
-            encoding="utf-8",
-        )
-        assert extract_installer_channel(cfg) == "24.04/stable"
 
-    def test_channel_stripped(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text(
-            """
-autoinstall:
-  refresh-installer:
-    channel: "  latest/edge  "
-""",
-            encoding="utf-8",
-        )
-        assert extract_installer_channel(cfg) == "latest/edge"
+# ---------------------------------------------------------------------------
+# flash
+# ---------------------------------------------------------------------------
 
-    def test_missing_channel_field_raises(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text(
-            """
-autoinstall:
-  refresh-installer:
-    update: true
-""",
-            encoding="utf-8",
-        )
-        with pytest.raises(SystemExit) as exc_info:
-            extract_installer_channel(cfg)
-        assert "Nie znaleziono pola 'autoinstall.refresh-installer.channel'" in str(exc_info.value)
+def test_flash_on_file_no_root_required(monkeypatch, run, tmp_path):
+    target = tmp_path / "out.img"
+    target.touch()
+    seen = {}
 
-    def test_missing_refresh_installer_raises(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text(
-            """
-autoinstall:
-  version: 1
-""",
-            encoding="utf-8",
-        )
-        with pytest.raises(SystemExit) as exc_info:
-            extract_installer_channel(cfg)
-        assert "Nie znaleziono pola 'autoinstall.refresh-installer.channel'" in str(exc_info.value)
+    monkeypatch.setattr(cli, "_is_block_device", lambda p: False)
+    monkeypatch.setattr(cli, "flash", lambda iso, target, yes: seen.update(iso=iso, target=target, yes=yes) or 0)
 
-    def test_missing_autoinstall_key_raises(self, tmp_path: Path):
-        cfg = tmp_path / "autoinstall.yaml"
-        cfg.write_text("other_key: 123\n", encoding="utf-8")
-        with pytest.raises(SystemExit) as exc_info:
-            extract_installer_channel(cfg)
-        assert "Nie znaleziono pola 'autoinstall.refresh-installer.channel'" in str(exc_info.value)
+    rc = run("flash", "img.iso", str(target), "--yes")
+    assert rc == 0
+    assert seen == {"iso": Path("img.iso"), "target": target, "yes": True}
+
+
+def test_flash_on_block_device_requires_root(monkeypatch, run, tmp_path):
+    target = tmp_path / "dev"
+
+    monkeypatch.setattr(cli, "_is_block_device", lambda p: True)
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 1000)
+
+    with pytest.raises(SystemExit, match="root"):
+        run("flash", "img.iso", str(target), "--yes")
+
+
+def test_flash_on_block_device_with_root(monkeypatch, run, tmp_path):
+    target = tmp_path / "dev"
+    called = {}
+
+    monkeypatch.setattr(cli, "_is_block_device", lambda p: True)
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(cli, "flash", lambda iso, target, yes: called.update(yes=yes) or 0)
+
+    assert run("flash", "img.iso", str(target), "--yes") == 0
+    assert called == {"yes": True}
+
+
+# ---------------------------------------------------------------------------
+# inject / import
+# ---------------------------------------------------------------------------
+
+def test_inject_requires_root(monkeypatch, run, tmp_path):
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 1000)
+    with pytest.raises(SystemExit, match="root"):
+        run("inject", str(tmp_path))
+
+
+def test_inject_with_root_dispatch(monkeypatch, run, tmp_path):
+    seen = {}
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(cli, "inject", lambda target, config: seen.update(target=target, config=config) or 0)
+
+    assert run("inject", "disk.img", "conf.yaml") == 0
+    assert seen == {"target": Path("disk.img"), "config": Path("conf.yaml")}
+
+
+def test_import_alias_dispatches_to_inject(monkeypatch, run, tmp_path):
+    seen = {}
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(cli, "inject", lambda target, config: seen.update(config=config) or 0)
+
+    assert run("import", "disk.img", "conf.yaml") == 0
+    assert seen == {"config": Path("conf.yaml")}
+
+
+# ---------------------------------------------------------------------------
+# extract / export
+# ---------------------------------------------------------------------------
+
+def test_extract_requires_root(monkeypatch, run, tmp_path):
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 1000)
+    with pytest.raises(SystemExit, match="root"):
+        run("extract", str(tmp_path))
+
+
+def test_extract_with_root_dispatch(monkeypatch, run, tmp_path):
+    seen = {}
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(cli, "extract", lambda target, output: seen.update(target=target, output=output) or 0)
+
+    assert run("extract", "disk.img", "out.yaml") == 0
+    assert seen == {"target": Path("disk.img"), "output": Path("out.yaml")}
+
+
+def test_export_alias_dispatches_to_extract(monkeypatch, run, tmp_path):
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(cli, "extract", lambda target, output: 0)
+    assert run("export", "disk.img") == 0
+
+
+# ---------------------------------------------------------------------------
+# cidata (podkomendy)
+# ---------------------------------------------------------------------------
+
+def test_cidata_inject_dispatch(monkeypatch, run, tmp_path):
+    seen = {}
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(cli, "inject", lambda target, config: seen.update(target=target) or 0)
+
+    assert run("cidata", "inject", "disk.img") == 0
+    assert seen == {"target": Path("disk.img")}
+
+
+def test_cidata_inject_requires_root(monkeypatch, run, tmp_path):
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 1000)
+    with pytest.raises(SystemExit, match="cidata inject"):
+        run("cidata", "inject", "disk.img")
+
+
+def test_cidata_extract_dispatch(monkeypatch, run, tmp_path):
+    seen = {}
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(cli, "extract", lambda target, output: seen.update(output=output) or 0)
+
+    assert run("cidata", "extract", "disk.img", "out.yaml") == 0
+    assert seen == {"output": Path("out.yaml")}
+
+
+def test_cidata_without_action_prints_help(monkeypatch, run, capsys):
+    assert run("cidata") == 0
+    out = capsys.readouterr().out
+    assert "inject" in out
+    assert "extract" in out
+
+
+# ---------------------------------------------------------------------------
+# Brak komendy
+# ---------------------------------------------------------------------------
+
+def test_no_subcommand_prints_help(run, capsys):
+    assert run() == 0
+    out = capsys.readouterr().out
+    assert "validate" in out
+    assert "flash" in out
+    assert "cidata" in out

@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 
 from autoinstall_helper.build import build_zipapp, compute_docker_digest, exclude_pycache
-from autoinstall_helper.cli import _get_docker_dir, docker_image_tag, get_docker_digest
+from autoinstall_helper.docker_utils import _get_docker_dir, docker_image_tag, get_docker_digest
 
 
 class TestBuildZipapp:

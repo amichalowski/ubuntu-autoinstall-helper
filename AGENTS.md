@@ -18,6 +18,6 @@ Repository guidelines for AI agents working on **autoinstall-helper**.
 ## Testing Conventions
 
 - Run tests via `uv run pytest`.
-- Mock at the point of **usage** (e.g., `autoinstall_helper.cli.subprocess.run`), not definition.
+- Mock at the point of **usage** (e.g., `autoinstall_helper.flash.subprocess.run`), not definition.
 - Use pytest's built-in `tmp_path` fixture for any file/directory I/O tests.
 - Never perform real block device operations, network calls, or Docker invocations during unit tests—mock system boundaries (`subprocess.run`, `urllib.request.urlopen`, `losetup`, `parted`).
