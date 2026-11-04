@@ -2,6 +2,10 @@
 
 Repository guidelines for AI agents working on **autoinstall-helper**.
 
+## Language
+
+- **English only:** All source comments, docstrings, CLI help text, printed/error messages, configuration file comments, and documentation must be written in **English**. Do not add Polish (or any other non-English) text anywhere in the repository.
+
 ## Toolchain & Environment
 
 - **Package & environment manager:** Always use [`uv`](https://docs.astral.sh/uv/) (`uv run ...`). Do not use raw `pip` or manage system virtualenvs directly.
