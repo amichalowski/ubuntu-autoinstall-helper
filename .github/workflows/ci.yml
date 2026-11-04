@@ -5,14 +5,14 @@ on:
     branches: [main]
   pull_request:
 
-# Anuluj przestarzały run, gdy ten sam PR/branch dostanie nowy push
+# Cancel the outdated run when the same PR/branch receives a new push
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  # dorny/test-reporter tworzy Check Run z wynikami testów (adnotacje + summary).
+  # dorny/test-reporter creates a Check Run with test results (annotations + summary).
   checks: write
 
 jobs:
@@ -33,8 +33,8 @@ jobs:
       - name: Run test suite
         run: uv run pytest -v --junitxml=junit/test-results.xml
 
-      # dorny/test-reporter parsuje JUnit XML i publikuje natywny Check Run:
-      # adnotacje przy nieudanych testach oraz sekcję z wynikami w Summary.
+      # dorny/test-reporter parses JUnit XML and publishes a native Check Run:
+      # annotations on failed tests and a results section in the Summary.
       - name: Publish test results
         if: ${{ !cancelled() }}
         uses: dorny/test-reporter@v3
@@ -43,7 +43,7 @@ jobs:
           path: junit/test-results.xml
           reporter: python-xunit
 
-      # Surowy JUnit XML jako artefakt do pobrania (debugging).
+      # Raw JUnit XML as a downloadable artifact (debugging).
       - name: Upload test results (JUnit)
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
@@ -65,16 +65,16 @@ jobs:
       - name: Install dependencies (uv.lock)
         run: uv sync --locked
 
-      # Format 'github' emituje workflow commands (::error file=...,line=...),
-      # które GitHub renderuje jako inline adnotacje w widoku runu
+      # The 'github' format emits workflow commands (::error file=...,line=...),
+      # which GitHub renders as inline annotations in the run view
       - name: Ruff lint (annotations)
         run: uv run ruff check --output-format=github .
 
       - name: Ruff format check
         run: uv run ruff format --check .
 
-      # Podsumowanie lintu w job summary (odpowiednik sekcji Tests):
-      # ✅ przy braku findings, tabela statystyk per reguła w przeciwnym razie
+      # Lint summary in the job summary (equivalent to the Tests section):
+      # ✅ when there are no findings, otherwise a per-rule statistics table
       - name: Write lint summary
         if: ${{ always() }}
         run: |

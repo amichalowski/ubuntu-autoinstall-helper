@@ -1,7 +1,7 @@
-"""Testy dla warstwy CLI (cli.py): dispatch komend i wymóg uprawnień roota.
+"""Tests for the CLI layer (cli.py): command dispatch and root-privilege requirement.
 
-Mockujemy funkcje w miejscu użycia (autoinstall_helper.cli.*), nie w definicji —
-patrz AGENTS.md.
+We mock functions at the point of use (autoinstall_helper.cli.*), not at definition —
+see AGENTS.md.
 """
 
 import sys
@@ -14,7 +14,7 @@ from autoinstall_helper import cli
 
 @pytest.fixture
 def run(monkeypatch):
-    """Wywołuje cli.main() z podanymi argv, zamieniając sys.argv."""
+    """Call cli.main() with the given argv, replacing sys.argv."""
 
     def _run(*argv):
         monkeypatch.setattr(sys, "argv", ["autoinstall-helper", *argv])
@@ -142,7 +142,7 @@ def test_export_alias_dispatches_to_extract(monkeypatch, run, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# cidata (podkomendy)
+# cidata (subcommands)
 # ---------------------------------------------------------------------------
 
 
@@ -178,7 +178,7 @@ def test_cidata_without_action_prints_help(monkeypatch, run, capsys):
 
 
 # ---------------------------------------------------------------------------
-# Brak komendy
+# No command
 # ---------------------------------------------------------------------------
 
 

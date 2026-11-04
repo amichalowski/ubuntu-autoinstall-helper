@@ -1,4 +1,4 @@
-"""Zapytania do Snap Store i mapowanie 'base' na obraz Ubuntu."""
+"""Snap Store queries and 'base' to Ubuntu image mapping."""
 
 import json
 import platform
@@ -11,7 +11,7 @@ SNAP_NAME = "ubuntu-desktop-bootstrap"
 
 
 def _get_snap_version_from_api(snap_name: str, channel: str) -> str | None:
-    """Odpytuje Snap Store API o wersję snapa bez konieczności posiadania zainstalowanego snapd."""
+    """Query the Snap Store API for the snap version without requiring an installed snapd."""
     arch_map = {
         "x86_64": "amd64",
         "aarch64": "arm64",
@@ -38,16 +38,16 @@ def _get_snap_version_from_api(snap_name: str, channel: str) -> str | None:
 
 
 def get_snap_version(channel: str) -> str:
-    """Zwraca wersję snapa ubuntu-desktop-bootstrap dla podanego kanału.
+    """Return the ubuntu-desktop-bootstrap snap version for the given channel.
 
-    Najpierw próbuje odpytać publiczne Snap Store API (działa na dowolnej dystrybucji
-    bez snapd), a w razie braku połączenia wykonuje fallback do lokalnego polecenia `snap info`.
+    It first queries the public Snap Store API (works on any distribution
+    without snapd) and falls back to the local `snap info` command if offline.
     """
     version = _get_snap_version_from_api(SNAP_NAME, channel)
     if version:
         return version
 
-    # Fallback do lokalnego polecenia `snap info` (jeśli snapd jest zainstalowany)
+    # Fallback to the local `snap info` command (if snapd is installed)
     if shutil.which("snap"):
         try:
             result = subprocess.run(
@@ -62,20 +62,20 @@ def get_snap_version(channel: str) -> str:
                     parts = line.split()
                     if len(parts) >= 2 and parts[1] != "--":
                         return parts[1]
-                    raise SystemExit(f"BŁĄD: Kanał '{channel}' nie ma opublikowanej wersji.")
+                    raise SystemExit(f"ERROR: Channel '{channel}' has no published version.")
         except subprocess.CalledProcessError:
             pass
 
     raise SystemExit(
-        f"BŁĄD: Nie można ustalić wersji snapa dla kanału '{channel}'. "
-        f"Sprawdź połączenie z siecią lub poprawność nazwy kanału."
+        f"ERROR: Could not determine the snap version for channel '{channel}'. "
+        f"Check the network connection or the channel name."
     )
 
 
 def get_base_image(version: str) -> str:
-    """Pobiera snapcraft.yaml z repo Subiquity i mapuje 'base' na obraz Ubuntu.
+    """Fetch snapcraft.yaml from the Subiquity repo and map 'base' to an Ubuntu image.
 
-    Mapowanie: coreXX -> ubuntu:XX.04
+    Mapping: coreXX -> ubuntu:XX.04
     """
     import yaml  # type: ignore[import-untyped]
 
@@ -86,7 +86,7 @@ def get_base_image(version: str) -> str:
     content = None
     for url in urls:
         try:
-            print(f"[autoinstall-helper] Pobieranie snapcraft.yaml z {url}...")
+            print(f"[autoinstall-helper] Downloading snapcraft.yaml from {url}...")
             with urllib.request.urlopen(url, timeout=30) as resp:
                 content = resp.read().decode("utf-8")
                 break
@@ -96,11 +96,11 @@ def get_base_image(version: str) -> str:
             raise
 
     if content is None:
-        raise SystemExit(f"BŁĄD: Nie znaleziono snapcraft.yaml dla wersji '{version}' w repo Subiquity.")
+        raise SystemExit(f"ERROR: snapcraft.yaml not found for version '{version}' in the Subiquity repo.")
 
     base = yaml.safe_load(content).get("base", "")
     if not base.startswith("core"):
-        raise SystemExit(f"BŁĄD: Nieoczekiwana wartość 'base' w snapcraft.yaml: '{base}'")
+        raise SystemExit(f"ERROR: Unexpected 'base' value in snapcraft.yaml: '{base}'")
 
     number = base.removeprefix("core")
     return f"ubuntu:{number}.04"

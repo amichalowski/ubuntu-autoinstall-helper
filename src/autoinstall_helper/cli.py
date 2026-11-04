@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""Narzędzie do zarządzania plikiem autoinstall.yaml.
+"""Tool for managing the autoinstall.yaml file.
 
-Dostępne komendy:
-  - validate: odczytuje kanał z autoinstall.yaml, ustala wersję przez
-    `snap info`, buduje obraz Dockera (jeśli brak) i uruchamia walidator
-    Subiquity w kontenerze.
-  - flash: zapisuje obraz ISO na target (urządzenie blokowe lub plik),
-    tworząc plik docelowy przez fallocate, jeśli jeszcze nie istnieje.
-  - inject: osadza autoinstall.yaml w partycji 'cidata' (FAT32) na targecie
-    (urządzeniu blokowym lub pliku-obrazie). Jeśli partycja nie istnieje,
-    tworzy ją na końcu dostępnego miejsca.
-  - extract: odczytuje user-data z partycji 'cidata' na targecie i zapisuje do pliku.
+Available commands:
+  - validate: reads the channel from autoinstall.yaml, resolves the version
+    via `snap info`, builds the Docker image (if missing) and runs the
+    Subiquity validator inside the container.
+  - flash: writes an ISO image to the target (block device or file),
+    creating the target file with fallocate if it does not exist yet.
+  - inject: embeds autoinstall.yaml in the 'cidata' (FAT32) partition on the
+    target (block device or image file). If the partition does not exist,
+    it is created at the end of the available space.
+  - extract: reads user-data from the 'cidata' partition on the target and saves it to a file.
 
-Logika poszczególnych komend znajduje się w dedykowanych modułach:
-  - config.py       — parsowanie autoinstall.yaml
-  - snapstore.py    — ustalanie wersji snapa i obrazu bazowego
-  - docker_utils.py — obraz Dockera walidatora i zasoby katalogu docker/
-  - flash.py        — zapis ISO na nośnik
-  - cidata.py       — partycja cidata (inject / extract)
-  - disk.py         — wspólne narzędzia urządzeń blokowych i GPT
+The logic of each command lives in dedicated modules:
+  - config.py       — autoinstall.yaml parsing
+  - snapstore.py    — snap version and base image resolution
+  - docker_utils.py — validator Docker image and docker/ directory assets
+  - flash.py        — writing the ISO to the medium
+  - cidata.py       — cidata partition (inject / extract)
+  - disk.py         — shared block device and GPT helpers
 """
 
 import argparse
@@ -41,148 +41,148 @@ from autoinstall_helper.snapstore import get_base_image, get_snap_version
 
 
 def _require_root(action: str) -> None:
-    """Sprawdza czy proces posiada uprawnienia roota; jeśli nie, kończy z czytelnym komunikatem."""
+    """Check whether the process has root privileges; exit with a clear message otherwise."""
     if os.geteuid() != 0:
         cmd_args = " ".join(sys.argv)
         raise SystemExit(
-            f"BŁĄD: Operacja '{action}' wymaga uprawnień administratora (root).\n"
-            f"Uruchom ponownie z sudo:\n"
+            f"ERROR: Operation '{action}' requires administrator (root) privileges.\n"
+            f"Re-run with sudo:\n"
             f"  sudo {sys.executable} {cmd_args}"
         )
 
 
 def validate(config_file: Path, validation: str = "full") -> int:
     if not config_file.exists():
-        raise SystemExit(f"BŁĄD: Plik nie istnieje: {config_file}")
+        raise SystemExit(f"ERROR: File does not exist: {config_file}")
 
-    print(f"[autoinstall-helper] Odczytywanie: {config_file}")
+    print(f"[autoinstall-helper] Reading: {config_file}")
     channel = extract_installer_channel(config_file)
-    print(f"[autoinstall-helper] Kanał instalatora: {channel}")
+    print(f"[autoinstall-helper] Installer channel: {channel}")
 
     version = get_snap_version(channel)
-    print(f"[autoinstall-helper] Wersja instalatora: {version}")
+    print(f"[autoinstall-helper] Installer version: {version}")
 
     tag = docker_image_tag(version)
     if docker_image_exists(tag):
-        print(f"[autoinstall-helper] Obraz '{tag}' już istnieje.")
+        print(f"[autoinstall-helper] Image '{tag}' already exists.")
     else:
         dockerfile = _get_docker_dir() / "Dockerfile"
         if not dockerfile.exists():
-            raise SystemExit(f"BŁĄD: Nie znaleziono Dockerfile w {dockerfile.parent}")
+            raise SystemExit(f"ERROR: Dockerfile not found in {dockerfile.parent}")
         base_image = get_base_image(version)
-        print(f"[autoinstall-helper] Obraz bazowy: {base_image}")
+        print(f"[autoinstall-helper] Base image: {base_image}")
         docker_build(tag, version, base_image, dockerfile)
 
     rc = docker_validate(tag, config_file, validation)
     if rc == 0:
-        print("[autoinstall-helper] Walidacja zakończona sukcesem!")
+        print("[autoinstall-helper] Validation completed successfully!")
     else:
-        print(f"[autoinstall-helper] Walidacja nieudana (kod: {rc}).", file=sys.stderr)
+        print(f"[autoinstall-helper] Validation failed (exit code: {rc}).", file=sys.stderr)
     return rc
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="autoinstall-helper",
-        description="Narzędzie do zarządzania konfiguracją autoinstall i nośnikami instalacyjnymi Ubuntu.",
+        description="Tool for managing autoinstall configuration and Ubuntu installation media.",
     )
-    subparsers = parser.add_subparsers(dest="subcommand", metavar="KOMENDA")
+    subparsers = parser.add_subparsers(dest="subcommand", metavar="COMMAND")
 
     # validate
     p_val = subparsers.add_parser(
         "validate",
-        help="Waliduje plik autoinstall.yaml w kontenerze Docker",
+        help="Validate the autoinstall.yaml file in a Docker container",
     )
     p_val.add_argument(
         "config",
         nargs="?",
         type=Path,
         default=Path("autoinstall.yaml"),
-        help="Ścieżka do pliku YAML (domyślnie: autoinstall.yaml)",
+        help="Path to the YAML file (default: autoinstall.yaml)",
     )
     p_val.add_argument(
         "--validation",
         choices=("autoinstall", "storage", "full"),
         default="full",
         help=(
-            "Zakres walidacji: autoinstall (Subiquity), storage (akcje storage + "
-            "Curtin schema), full (oba sprawdzenia; domyślnie)"
+            "Validation scope: autoinstall (Subiquity), storage (storage actions + "
+            "Curtin schema), full (both checks; default)"
         ),
     )
 
     # flash
     p_flash = subparsers.add_parser(
         "flash",
-        help="Zapisuje obraz ISO na target (urządzenie blokowe lub plik-obraz)",
+        help="Write an ISO image to the target (block device or image file)",
     )
-    p_flash.add_argument("iso", type=Path, help="Ścieżka do pliku ISO")
+    p_flash.add_argument("iso", type=Path, help="Path to the ISO file")
     p_flash.add_argument(
         "target",
         type=Path,
-        help="Urządzenie blokowe (np. /dev/sdb) lub plik-obraz",
+        help="Block device (e.g. /dev/sdb) or image file",
     )
     p_flash.add_argument(
         "-y",
         "--yes",
         action="store_true",
-        help="Pomiń potwierdzenie zapisu na urządzenie blokowe",
+        help="Skip confirmation before writing to a block device",
     )
 
     # inject (alias: import)
     p_inject = subparsers.add_parser(
         "inject",
         aliases=["import"],
-        help="Osadza YAML w partycji cidata (FAT32) na targecie",
+        help="Embed the YAML in the cidata (FAT32) partition on the target",
     )
-    p_inject.add_argument("target", type=Path, help="Target (urządzenie blokowe lub plik-obraz)")
+    p_inject.add_argument("target", type=Path, help="Target (block device or image file)")
     p_inject.add_argument(
         "config",
         nargs="?",
         type=Path,
         default=Path("autoinstall.yaml"),
-        help="Ścieżka do pliku YAML (domyślnie: autoinstall.yaml)",
+        help="Path to the YAML file (default: autoinstall.yaml)",
     )
 
     # extract (alias: export)
     p_extract = subparsers.add_parser(
         "extract",
         aliases=["export"],
-        help="Odczytuje user-data z partycji cidata (FAT32) na targecie",
+        help="Read user-data from the cidata (FAT32) partition on the target",
     )
-    p_extract.add_argument("target", type=Path, help="Target (urządzenie blokowe lub plik-obraz)")
+    p_extract.add_argument("target", type=Path, help="Target (block device or image file)")
     p_extract.add_argument(
         "output",
         nargs="?",
         type=Path,
         default=Path("autoinstall.yaml"),
-        help="Ścieżka do pliku wyjściowego (domyślnie: autoinstall.yaml)",
+        help="Path to the output file (default: autoinstall.yaml)",
     )
 
     # cidata group (cidata inject / cidata extract)
     p_cidata = subparsers.add_parser(
         "cidata",
-        help="Zarządzanie partycją cidata (podkomendy: inject, extract)",
+        help="Manage the cidata partition (subcommands: inject, extract)",
     )
-    cidata_sub = p_cidata.add_subparsers(dest="cidata_subcommand", metavar="AKCJA")
+    cidata_sub = p_cidata.add_subparsers(dest="cidata_subcommand", metavar="ACTION")
 
-    c_inject = cidata_sub.add_parser("inject", help="Osadza YAML w partycji cidata")
-    c_inject.add_argument("target", type=Path, help="Target (urządzenie blokowe lub plik-obraz)")
+    c_inject = cidata_sub.add_parser("inject", help="Embed the YAML in the cidata partition")
+    c_inject.add_argument("target", type=Path, help="Target (block device or image file)")
     c_inject.add_argument(
         "config",
         nargs="?",
         type=Path,
         default=Path("autoinstall.yaml"),
-        help="Ścieżka do pliku YAML (domyślnie: autoinstall.yaml)",
+        help="Path to the YAML file (default: autoinstall.yaml)",
     )
 
-    c_extract = cidata_sub.add_parser("extract", help="Odczytuje user-data z partycji cidata")
-    c_extract.add_argument("target", type=Path, help="Target (urządzenie blokowe lub plik-obraz)")
+    c_extract = cidata_sub.add_parser("extract", help="Read user-data from the cidata partition")
+    c_extract.add_argument("target", type=Path, help="Target (block device or image file)")
     c_extract.add_argument(
         "output",
         nargs="?",
         type=Path,
         default=Path("autoinstall.yaml"),
-        help="Ścieżka do pliku wyjściowego (domyślnie: autoinstall.yaml)",
+        help="Path to the output file (default: autoinstall.yaml)",
     )
 
     args = parser.parse_args()
@@ -192,7 +192,7 @@ def main() -> int:
 
     if args.subcommand == "flash":
         if _is_block_device(args.target):
-            _require_root("flash na urządzenie blokowe")
+            _require_root("flash to a block device")
         return flash(args.iso, args.target, yes=args.yes)
 
     if args.subcommand in ("inject", "import"):

@@ -79,7 +79,7 @@ autoinstall:
         )
         with pytest.raises(SystemExit) as exc_info:
             extract_installer_channel(cfg)
-        assert "Nie znaleziono pola 'autoinstall.refresh-installer.channel'" in str(exc_info.value)
+        assert "Field 'autoinstall.refresh-installer.channel' not found" in str(exc_info.value)
 
     def test_missing_refresh_installer_raises(self, tmp_path: Path):
         cfg = tmp_path / "autoinstall.yaml"
@@ -92,11 +92,11 @@ autoinstall:
         )
         with pytest.raises(SystemExit) as exc_info:
             extract_installer_channel(cfg)
-        assert "Nie znaleziono pola 'autoinstall.refresh-installer.channel'" in str(exc_info.value)
+        assert "Field 'autoinstall.refresh-installer.channel' not found" in str(exc_info.value)
 
     def test_missing_autoinstall_key_raises(self, tmp_path: Path):
         cfg = tmp_path / "autoinstall.yaml"
         cfg.write_text("other_key: 123\n", encoding="utf-8")
         with pytest.raises(SystemExit) as exc_info:
             extract_installer_channel(cfg)
-        assert "Nie znaleziono pola 'autoinstall.refresh-installer.channel'" in str(exc_info.value)
+        assert "Field 'autoinstall.refresh-installer.channel' not found" in str(exc_info.value)

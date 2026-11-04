@@ -1,4 +1,4 @@
-"""Zarządzanie obrazem Dockera walidatora i zasobami katalogu docker/."""
+"""Management of the validator Docker image and docker/ directory assets."""
 
 import atexit
 import hashlib
@@ -16,11 +16,11 @@ _DOCKER_DIR_CACHE: Path | None = None
 
 
 def _get_docker_dir() -> Path:
-    """Zwraca ścieżkę do katalogu docker/.
+    """Return the path to the docker/ directory.
 
-    W trybie deweloperskim (niespakowanym) zwraca istniejący katalog obok modułu.
-    W trybie zipapp (.pyz) wypakowuje zawartość katalogu docker/ do katalogu tymczasowego,
-    który jest automatycznie usuwany przy zakończeniu działania programu.
+    In development mode (unpacked) it returns the existing directory next to the module.
+    In zipapp (.pyz) mode it extracts the docker/ directory contents into a temporary
+    directory that is automatically removed when the program exits.
     """
     global _DOCKER_DIR_CACHE
     if _DOCKER_DIR_CACHE is not None and _DOCKER_DIR_CACHE.is_dir():
@@ -59,7 +59,7 @@ def _get_docker_dir() -> Path:
         _DOCKER_DIR_CACHE = tmp_dir
         return tmp_dir
 
-    raise SystemExit(f"BŁĄD: Nie znaleziono katalogu 'docker' (szukano w {candidate}).")
+    raise SystemExit(f"ERROR: 'docker' directory not found (looked in {candidate}).")
 
 
 def docker_image_exists(tag: str) -> bool:
@@ -75,10 +75,10 @@ _DOCKER_DIGEST_CACHE: str | None = None
 
 
 def get_docker_digest() -> str:
-    """Zwraca 12-znakowy skrót SHA-256 zasobów kontenera bez rozpakowywania na dysk.
+    """Return the 12-character SHA-256 digest of the container assets without writing to disk.
 
-    1. W trybie zipapp odczytuje plik DOCKER_DIGEST bezpośrednio z archiwum do pamięci RAM.
-    2. W trybie deweloperskim sprawdza plik DOCKER_DIGEST obok modułu lub oblicza skrót w locie.
+    1. In zipapp mode it reads the DOCKER_DIGEST file directly from the archive into RAM.
+    2. In development mode it checks the DOCKER_DIGEST file next to the module or computes the digest on the fly.
     """
     global _DOCKER_DIGEST_CACHE
     if _DOCKER_DIGEST_CACHE is not None:
@@ -86,13 +86,13 @@ def get_docker_digest() -> str:
 
     current_file = Path(__file__).resolve()
 
-    # 1. Sprawdź czy plik DOCKER_DIGEST istnieje bezpośrednio na dysku (obok modułu)
+    # 1. Check whether the DOCKER_DIGEST file exists directly on disk (next to the module)
     digest_file = current_file.parent / "DOCKER_DIGEST"
     if digest_file.is_file():
         _DOCKER_DIGEST_CACHE = digest_file.read_text(encoding="utf-8").strip()
         return _DOCKER_DIGEST_CACHE
 
-    # 2. Tryb deweloperski (katalog docker/ na dysku)
+    # 2. Development mode (docker/ directory on disk)
     docker_dir = current_file.parent / "docker"
     if docker_dir.is_dir() and (docker_dir / "Dockerfile").exists():
         digest = hashlib.sha256()
@@ -103,7 +103,7 @@ def get_docker_digest() -> str:
         _DOCKER_DIGEST_CACHE = digest.hexdigest()[:12]
         return _DOCKER_DIGEST_CACHE
 
-    # 3. Tryb zipapp: odczytaj DOCKER_DIGEST bezpośrednio z archiwum zip bez rozpakowywania
+    # 3. Zipapp mode: read DOCKER_DIGEST directly from the zip archive without extracting
     for parent in [current_file] + list(current_file.parents):
         try:
             if parent.is_file() and zipfile.is_zipfile(parent):
@@ -112,7 +112,7 @@ def get_docker_digest() -> str:
                     if "autoinstall_helper/DOCKER_DIGEST" in namelist:
                         _DOCKER_DIGEST_CACHE = zf.read("autoinstall_helper/DOCKER_DIGEST").decode("utf-8").strip()
                         return _DOCKER_DIGEST_CACHE
-                    # Awaryjny fallback: policz z plików w archiwum w RAM bez tworzenia plików w tmp
+                    # Emergency fallback: compute from files in the archive in RAM without creating tmp files
                     digest = hashlib.sha256()
                     for name in ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py"):
                         entry = f"autoinstall_helper/docker/{name}"
@@ -124,7 +124,7 @@ def get_docker_digest() -> str:
         except (OSError, ValueError):
             continue
 
-    raise SystemExit("BŁĄD: Nie można ustalić skrótu zasobów katalogu docker.")
+    raise SystemExit("ERROR: Could not determine the digest of the docker/ assets.")
 
 
 def docker_image_tag(version: str, digest_or_dockerfile: str | Path | None = None) -> str:
@@ -147,7 +147,7 @@ def docker_image_tag(version: str, digest_or_dockerfile: str | Path | None = Non
 
 
 def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> None:
-    print(f"[autoinstall-helper] Budowanie obrazu '{tag}' (base: {base_image})...")
+    print(f"[autoinstall-helper] Building image '{tag}' (base: {base_image})...")
     subprocess.run(
         [
             "docker",
@@ -164,7 +164,7 @@ def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> N
         ],
         check=True,
     )
-    print(f"[autoinstall-helper] Obraz '{tag}' zbudowany.")
+    print(f"[autoinstall-helper] Image '{tag}' built.")
 
 
 def docker_validate(tag: str, config_file: Path, validation: str) -> int:
@@ -185,6 +185,6 @@ def docker_validate(tag: str, config_file: Path, validation: str) -> int:
     if not has_cloud_config_header(config_file):
         cmd.append("--no-expect-cloudconfig")
 
-    print(f"[autoinstall-helper] Walidacja '{config_file.name}' w kontenerze '{tag}'...")
+    print(f"[autoinstall-helper] Validating '{config_file.name}' in container '{tag}'...")
     result = subprocess.run(cmd, check=False)
     return result.returncode

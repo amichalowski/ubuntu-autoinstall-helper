@@ -1,4 +1,4 @@
-"""Zapis obrazu ISO na target (urządzenie blokowe lub plik-obraz)."""
+"""Write an ISO image to the target (block device or image file)."""
 
 import subprocess
 import sys
@@ -6,12 +6,12 @@ from pathlib import Path
 
 from autoinstall_helper.disk import _fix_gpt_backup_header, _is_block_device
 
-# Zapas miejsca dodawany przy tworzeniu pliku-targetu (na partycję z autoinstall.yaml)
+# Extra space added when creating the target file (for the partition holding autoinstall.yaml)
 FLASH_EXTRA_BYTES = 128 * 1024 * 1024  # 128 MB
 
 
 def _is_btrfs(path: Path) -> bool:
-    """Sprawdza czy ścieżka leży na systemie plików BTRFS."""
+    """Check whether the path resides on a BTRFS filesystem."""
     result = subprocess.run(
         ["stat", "-f", "--format=%T", str(path)],
         capture_output=True,
@@ -22,18 +22,18 @@ def _is_btrfs(path: Path) -> bool:
 
 
 def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
-    """Zapisuje obraz ISO na target używając dd.
+    """Write the ISO image to the target using dd.
 
-    Jeśli target nie istnieje i nie jest urządzeniem blokowym, tworzy
-    plik o rozmiarze ISO + FLASH_EXTRA_BYTES przez fallocate.
-    Na systemach plików BTRFS plik otrzymuje atrybut No-COW (chattr +C).
-    Po zakończeniu dd wywołuje sync.
+    If the target does not exist and is not a block device, it creates
+    a file of size ISO + FLASH_EXTRA_BYTES via fallocate.
+    On BTRFS filesystems the file gets the No-COW attribute (chattr +C).
+    It calls sync after dd finishes.
     """
-    # Walidacja ISO
+    # ISO validation
     if not iso_path.exists():
-        raise SystemExit(f"BŁĄD: Plik ISO nie istnieje: {iso_path}")
+        raise SystemExit(f"ERROR: ISO file does not exist: {iso_path}")
     if not iso_path.is_file():
-        raise SystemExit(f"BŁĄD: Podana ścieżka ISO nie jest plikiem: {iso_path}")
+        raise SystemExit(f"ERROR: The given ISO path is not a file: {iso_path}")
 
     iso_size = iso_path.stat().st_size
     print(f"[autoinstall-helper] ISO: {iso_path} ({iso_size / 1024**2:.1f} MB)")
@@ -41,47 +41,47 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
     target_is_block = _is_block_device(target)
 
     if target_is_block:
-        print(f"[autoinstall-helper] Target: urządzenie blokowe {target}")
+        print(f"[autoinstall-helper] Target: block device {target}")
         if not yes:
             if sys.stdin.isatty():
                 confirm = (
                     input(
-                        f"[autoinstall-helper] OSTRZEŻENIE: Cel '{target}' jest urządzeniem blokowym!\n"
-                        f"Wszystkie dane na {target} zostaną bezpowrotnie utracone. Kontynuować? [y/N]: "
+                        f"[autoinstall-helper] WARNING: Target '{target}' is a block device!\n"
+                        f"All data on {target} will be permanently lost. Continue? [y/N]: "
                     )
                     .strip()
                     .lower()
                 )
-                if confirm not in ("y", "yes", "t", "tak"):
-                    print("[autoinstall-helper] Anulowano przez użytkownika.")
+                if confirm not in ("y", "yes"):
+                    print("[autoinstall-helper] Cancelled by user.")
                     return 1
             else:
                 raise SystemExit(
-                    f"BŁĄD: Zapis na urządzenie blokowe {target} w trybie nieinteraktywnym wymaga flagi -y / --yes."
+                    f"ERROR: Writing to block device {target} in non-interactive mode requires the -y / --yes flag."
                 )
     elif target.exists():
         total_size = iso_size + FLASH_EXTRA_BYTES
         current_size = target.stat().st_size
         if current_size < total_size:
             print(
-                f"[autoinstall-helper] Target to istniejący plik {target} ({current_size / 1024**2:.1f} MB). "
-                f"Powiększam do {total_size / 1024**2:.1f} MB (ISO + 128 MB zapasu)..."
+                f"[autoinstall-helper] Target is an existing file {target} ({current_size / 1024**2:.1f} MB). "
+                f"Growing to {total_size / 1024**2:.1f} MB (ISO + 128 MB spare)..."
             )
             subprocess.run(["fallocate", "-l", str(total_size), str(target)], check=True)
         else:
-            print(f"[autoinstall-helper] Target: istniejący plik {target} ({current_size / 1024**2:.1f} MB)")
+            print(f"[autoinstall-helper] Target: existing file {target} ({current_size / 1024**2:.1f} MB)")
     else:
-        # Utwórz plik-target
+        # Create the target file
         total_size = iso_size + FLASH_EXTRA_BYTES
         print(
-            f"[autoinstall-helper] Target nie istnieje. Tworzę plik "
-            f"{target} ({total_size / 1024**2:.1f} MB = ISO + 128 MB zapasu)..."
+            f"[autoinstall-helper] Target does not exist. Creating file "
+            f"{target} ({total_size / 1024**2:.1f} MB = ISO + 128 MB spare)..."
         )
 
-        # Na BTRFS ustaw atrybut No-COW przed zapisem danych
+        # On BTRFS set the No-COW attribute before writing data
         if _is_btrfs(target.parent):
-            print("[autoinstall-helper] Wykryto BTRFS — tworzę plik i ustawiam atrybut No-COW (chattr +C).")
-            # Plik musi istnieć przed chattr
+            print("[autoinstall-helper] BTRFS detected — creating file and setting the No-COW attribute (chattr +C).")
+            # The file must exist before chattr
             target.touch()
             subprocess.run(["chattr", "+C", str(target)], check=True)
 
@@ -89,10 +89,10 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
             ["fallocate", "-l", str(total_size), str(target)],
             check=True,
         )
-        print(f"[autoinstall-helper] Plik {target} utworzony.")
+        print(f"[autoinstall-helper] File {target} created.")
 
-    # Zapis ISO przez dd (conv=notrunc,fsync zapobiega obcięciu pliku do rozmiaru ISO)
-    print(f"[autoinstall-helper] Zapisywanie ISO na {target} (dd)... To może chwilę potrwać.")
+    # Write the ISO via dd (conv=notrunc,fsync prevents truncating the file to the ISO size)
+    print(f"[autoinstall-helper] Writing ISO to {target} (dd)... This may take a while.")
     dd_cmd = [
         "dd",
         f"if={iso_path}",
@@ -103,13 +103,13 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
     ]
     result = subprocess.run(dd_cmd, check=False)
     if result.returncode != 0:
-        raise SystemExit(f"BŁĄD: dd zakończył się kodem {result.returncode}.")
+        raise SystemExit(f"ERROR: dd exited with code {result.returncode}.")
 
-    print("[autoinstall-helper] Synchronizacja buforów (sync)...")
+    print("[autoinstall-helper] Synchronizing buffers (sync)...")
     subprocess.run(["sync"], check=True)
 
-    # Napraw tablicę GPT po dd na powiększony target
+    # Repair the GPT after dd to the enlarged target
     _fix_gpt_backup_header(target)
 
-    print(f"[autoinstall-helper] Flash zakończony pomyślnie: {iso_path} → {target}")
+    print(f"[autoinstall-helper] Flash completed successfully: {iso_path} → {target}")
     return 0

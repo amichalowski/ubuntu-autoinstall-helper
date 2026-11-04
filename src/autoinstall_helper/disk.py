@@ -1,4 +1,4 @@
-"""Wspólne narzędzia do pracy z urządzeniami blokowymi i tablicami GPT."""
+"""Shared helpers for working with block devices and GPT tables."""
 
 import shutil
 import subprocess
@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def _is_block_device(path: Path) -> bool:
-    """Sprawdza czy ścieżka wskazuje na urządzenie blokowe."""
+    """Check whether the path points to a block device."""
     try:
         return path.stat().st_mode & 0o170000 == 0o060000
     except OSError:
@@ -14,15 +14,15 @@ def _is_block_device(path: Path) -> bool:
 
 
 def _fix_gpt_backup_header(target: Path | str) -> None:
-    """Przenosi kopię zapasową nagłówka GPT (Backup GPT) na fizyczny koniec dysku/obrazu.
+    """Move the backup GPT header to the physical end of the disk/image.
 
-    Po powiększeniu pliku przez fallocate lub nagraniu ISO na większy pendrive
-    nagłówek Backup GPT znajduje się w starym miejscu, co powoduje błędy i ostrzeżenia
-    w parted/kernelu. sgdisk -e naprawia tablicę i przesuwa nagłówek na koniec.
+    After growing a file with fallocate or writing an ISO to a larger USB stick,
+    the backup GPT header is left in its old location, causing errors and warnings
+    in parted/kernel. sgdisk -e repairs the table and moves the header to the end.
     """
     target_str = str(target)
     if shutil.which("sgdisk"):
         res = subprocess.run(["sgdisk", "-e", target_str], capture_output=True, text=True, check=False)
         if res.returncode == 0:
-            print(f"[autoinstall-helper] Dopasowano zapasowy nagłówek GPT do końca nośnika ({target_str}).")
+            print(f"[autoinstall-helper] Adjusted the backup GPT header to the end of the medium ({target_str}).")
     subprocess.run(["partprobe", target_str], capture_output=True, check=False)

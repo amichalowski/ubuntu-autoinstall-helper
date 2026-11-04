@@ -1,5 +1,5 @@
-# Hooki lokalne delegujące do ruffa z dev-dependencies (wersja przypięta w uv.lock,
-# identyczna jak w CI). Instalacja jednorazowa per klon repo:
+# Local hooks delegating to ruff from dev-dependencies (version pinned in uv.lock,
+# identical to CI). One-time setup per clone:
 #   uv run pre-commit install
 repos:
   - repo: local
