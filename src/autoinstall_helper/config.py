@@ -17,7 +17,7 @@ def extract_installer_channel(config_file: Path) -> str:
 def has_cloud_config_header(config_file: Path) -> bool:
     """Check whether the file starts with '#cloud-config'."""
     try:
-        with config_file.open() as f:
+        with config_file.open(encoding="utf-8") as f:
             return f.readline().strip() == "#cloud-config"
     except OSError:
         return False
