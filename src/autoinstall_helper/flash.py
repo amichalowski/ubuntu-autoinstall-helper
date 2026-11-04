@@ -21,6 +21,25 @@ def _is_btrfs(path: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip().lower() == "btrfs"
 
 
+def _apply_nocow(target: Path) -> None:
+    """Set the No-COW attribute on a new or empty image file on BTRFS.
+
+    ``chattr +C`` only affects extents written afterwards (see chattr(1)), so it
+    is effective solely while the file is still empty. Files that already contain
+    data are left untouched because converting their existing extents is not
+    possible.
+    """
+    if not _is_btrfs(target.parent):
+        return
+    if target.exists():
+        if target.stat().st_size != 0:
+            return
+    else:
+        target.touch()
+    print("[autoinstall-helper] BTRFS detected — setting the No-COW attribute (chattr +C).")
+    subprocess.run(["chattr", "+C", str(target)], check=True)
+
+
 def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
     """Write the ISO image to the target using dd.
 
@@ -67,6 +86,7 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
                 f"[autoinstall-helper] Target is an existing file {target} ({current_size / 1024**2:.1f} MB). "
                 f"Growing to {total_size / 1024**2:.1f} MB (ISO + 128 MB spare)..."
             )
+            _apply_nocow(target)
             subprocess.run(["fallocate", "-l", str(total_size), str(target)], check=True)
         else:
             print(f"[autoinstall-helper] Target: existing file {target} ({current_size / 1024**2:.1f} MB)")
@@ -78,12 +98,8 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
             f"{target} ({total_size / 1024**2:.1f} MB = ISO + 128 MB spare)..."
         )
 
-        # On BTRFS set the No-COW attribute before writing data
-        if _is_btrfs(target.parent):
-            print("[autoinstall-helper] BTRFS detected — creating file and setting the No-COW attribute (chattr +C).")
-            # The file must exist before chattr
-            target.touch()
-            subprocess.run(["chattr", "+C", str(target)], check=True)
+        # On BTRFS set the No-COW attribute before writing any data
+        _apply_nocow(target)
 
         subprocess.run(
             ["fallocate", "-l", str(total_size), str(target)],
