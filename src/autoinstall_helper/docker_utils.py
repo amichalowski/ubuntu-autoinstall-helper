@@ -12,7 +12,26 @@ from autoinstall_helper.config import has_cloud_config_header
 
 DOCKER_IMAGE_REPO = "ubuntu-desktop-bootstrap"
 
+# Validator assets hashed into the image tag; order is significant and must stay stable.
+DOCKER_ASSET_FILES = ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py")
+
 _DOCKER_DIR_CACHE: Path | None = None
+
+
+def compute_assets_digest(docker_dir: Path) -> str:
+    """Compute the 12-character SHA-256 digest of the validator assets in docker_dir.
+
+    The file names and contents are hashed in a fixed order, so the digest is
+    deterministic and changes whenever any asset changes.
+    """
+    digest = hashlib.sha256()
+    for name in DOCKER_ASSET_FILES:
+        asset = docker_dir / name
+        if not asset.exists():
+            raise FileNotFoundError(f"Missing required file in the docker directory: {asset}")
+        digest.update(name.encode("utf-8"))
+        digest.update(asset.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def _get_docker_dir() -> Path:
@@ -95,12 +114,7 @@ def get_docker_digest() -> str:
     # 2. Development mode (docker/ directory on disk)
     docker_dir = current_file.parent / "docker"
     if docker_dir.is_dir() and (docker_dir / "Dockerfile").exists():
-        digest = hashlib.sha256()
-        for name in ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py"):
-            asset = docker_dir / name
-            digest.update(name.encode("utf-8"))
-            digest.update(asset.read_bytes())
-        _DOCKER_DIGEST_CACHE = digest.hexdigest()[:12]
+        _DOCKER_DIGEST_CACHE = compute_assets_digest(docker_dir)
         return _DOCKER_DIGEST_CACHE
 
     # 3. Zipapp mode: read DOCKER_DIGEST directly from the zip archive without extracting
@@ -114,7 +128,7 @@ def get_docker_digest() -> str:
                         return _DOCKER_DIGEST_CACHE
                     # Emergency fallback: compute from files in the archive in RAM without creating tmp files
                     digest = hashlib.sha256()
-                    for name in ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py"):
+                    for name in DOCKER_ASSET_FILES:
                         entry = f"autoinstall_helper/docker/{name}"
                         if entry in namelist:
                             digest.update(name.encode("utf-8"))
@@ -130,15 +144,7 @@ def get_docker_digest() -> str:
 def docker_image_tag(version: str, digest_or_dockerfile: str | Path | None = None) -> str:
     """Include local validation assets in the image tag to avoid stale images."""
     if isinstance(digest_or_dockerfile, Path):
-        digest = hashlib.sha256()
-        for path in (
-            digest_or_dockerfile,
-            digest_or_dockerfile.parent / "timedatectl.sh",
-            digest_or_dockerfile.parent / "validate-autoinstall.py",
-        ):
-            digest.update(path.name.encode("utf-8"))
-            digest.update(path.read_bytes())
-        tag_hash = digest.hexdigest()[:12]
+        tag_hash = compute_assets_digest(digest_or_dockerfile.parent)
     elif isinstance(digest_or_dockerfile, str):
         tag_hash = digest_or_dockerfile
     else:

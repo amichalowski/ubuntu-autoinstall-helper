@@ -1,11 +1,12 @@
 """Tool for building a single zipapp executable file (.pyz)."""
 
 import argparse
-import hashlib
 import stat
 import sys
 import zipapp
 from pathlib import Path
+
+from autoinstall_helper.docker_utils import compute_assets_digest
 
 
 def exclude_pycache(path: Path) -> bool:
@@ -15,14 +16,7 @@ def exclude_pycache(path: Path) -> bool:
 
 def compute_docker_digest(docker_dir: Path) -> str:
     """Compute a 12-character SHA-256 digest from the key files in the docker/ directory."""
-    digest = hashlib.sha256()
-    for name in ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py"):
-        asset = docker_dir / name
-        if not asset.exists():
-            raise FileNotFoundError(f"Missing required file in the docker directory: {asset}")
-        digest.update(name.encode("utf-8"))
-        digest.update(asset.read_bytes())
-    return digest.hexdigest()[:12]
+    return compute_assets_digest(docker_dir)
 
 
 def build_zipapp(
