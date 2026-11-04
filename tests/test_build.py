@@ -73,6 +73,35 @@ class TestDockerDigestAndTag:
         tag = docker_image_tag("24.04", "123456abcdef")
         assert tag == "ubuntu-desktop-bootstrap:24.04-123456abcdef"
 
+    @staticmethod
+    def _write_assets(directory: Path, dockerfile_content: str = "FROM ubuntu:24.04\n") -> Path:
+        (directory / "Dockerfile").write_text(dockerfile_content, encoding="utf-8")
+        (directory / "timedatectl.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (directory / "validate-autoinstall.py").write_text("print('ok')\n", encoding="utf-8")
+        return directory / "Dockerfile"
+
+    def test_docker_image_tag_path_branch_is_deterministic(self, tmp_path: Path):
+        dockerfile = self._write_assets(tmp_path)
+
+        tag_one = docker_image_tag("24.04", dockerfile)
+        tag_two = docker_image_tag("24.04", dockerfile)
+
+        assert tag_one == tag_two
+        prefix = "ubuntu-desktop-bootstrap:24.04-"
+        assert tag_one.startswith(prefix)
+        digest = tag_one[len(prefix) :]
+        assert len(digest) == 12
+        assert all(c in "0123456789abcdef" for c in digest)
+
+    def test_docker_image_tag_path_branch_changes_with_content(self, tmp_path: Path):
+        dockerfile = self._write_assets(tmp_path)
+        tag_before = docker_image_tag("24.04", dockerfile)
+
+        dockerfile.write_text("FROM ubuntu:24.04\nRUN echo changed\n", encoding="utf-8")
+        tag_after = docker_image_tag("24.04", dockerfile)
+
+        assert tag_before != tag_after
+
 
 class TestGetDockerDir:
     """Tests for _get_docker_dir in development mode."""
