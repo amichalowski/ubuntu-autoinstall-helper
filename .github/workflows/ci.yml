@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Reused by .github/workflows/release.yml so the release gate runs the
+  # exact same tests + ruff as regular CI.
+  workflow_call:
 
 # Cancel the outdated run when the same PR/branch receives a new push
 concurrency:

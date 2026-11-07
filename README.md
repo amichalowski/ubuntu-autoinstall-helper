@@ -1,6 +1,7 @@
 # Ubuntu Autoinstall Helper & Validator
 
 [![CI](https://github.com/amichalowski/ubuntu-autoinstall-helper/actions/workflows/ci.yml/badge.svg)](https://github.com/amichalowski/ubuntu-autoinstall-helper/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/amichalowski/ubuntu-autoinstall-helper)](https://github.com/amichalowski/ubuntu-autoinstall-helper/releases)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://conventionalcommits.org)
 [![Linted & Formatted with Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
@@ -56,7 +57,9 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 ```text
 .
 ├── .github/workflows/ci.yml                   # GitHub Actions: pytest (JUnit reporting) + ruff (tests, lint)
+├── .github/workflows/release.yml              # Tag-driven release: CI gate → zipapp build → release notes → GitHub Release
 ├── .pre-commit-config.yaml                    # Local ruff git hooks (uv run pre-commit install)
+├── cliff.toml                                 # git-cliff config: release notes from Conventional Commits
 ├── pyproject.toml                             # Project metadata, console scripts, ruff config
 ├── AGENTS.md                                  # Repository guidelines for AI agents
 ├── src/
@@ -154,6 +157,37 @@ chmod +x autoinstall-helper.pyz
 
 > [!NOTE]
 > When executing the `validate` command from within a `.pyz` archive, the required Docker build context assets (`Dockerfile`, `timedatectl.sh`, `validate-autoinstall.py`) are automatically and lazily extracted into a temporary directory in `/tmp` and cleaned up upon exit. Commands that do not use Docker (`flash`, `inject`, `extract`) never perform extraction.
+
+### Releases (GitHub Actions)
+
+Releases are driven by **semver tags** pushed to the repository:
+
+| Tag | Type | Example |
+| --- | --- | --- |
+| `vX.Y.Z` | Stable release | `v0.2.0` |
+| `vX.Y.Z-rc.N` / `vX.Y.Z-beta.N` | Prerelease | `v0.2.0-rc.1` |
+
+Pushing a tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which:
+
+1. **Quality gate** — runs the exact same pytest + ruff jobs as CI (reused from [`ci.yml`](.github/workflows/ci.yml) via `workflow_call`) on the tagged commit.
+2. **Version guard** — fails if the tag base does not match the version in `pyproject.toml` (e.g. tag `v0.2.0-rc.1` requires `0.2.0`).
+3. **Build** — produces `autoinstall-helper-<tag>.pyz` and a `SHA256SUMS` file.
+4. **Publish** — generates release notes from [Conventional Commits](https://conventionalcommits.org) using [`git-cliff`](https://git-cliff.org) (see [`cliff.toml`](cliff.toml)) and creates a GitHub Release with the artifacts attached. Tags with a semver prerelease suffix are marked as **prerelease** and excluded from "Latest".
+
+To cut a release:
+
+```bash
+# 1. Make sure pyproject.toml version matches the upcoming tag base (here: 0.2.0)
+# 2. Tag and push:
+git tag -a v0.2.0-rc.1 -m "v0.2.0-rc.1"   # release candidate (prerelease)
+git push origin v0.2.0-rc.1
+
+git tag -a v0.2.0 -m "v0.2.0"             # final release
+git push origin v0.2.0
+```
+
+> [!NOTE]
+> Release notes are generated from the commits between the pushed tag and the previous tag. A final release published after a release candidate therefore contains only the changes made since that candidate; use `gh release edit <tag>` to enrich the notes manually if needed.
 
 ---
 

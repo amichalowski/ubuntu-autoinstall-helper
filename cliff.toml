@@ -1,0 +1,36 @@
+# git-cliff configuration: release notes generated from Conventional Commits
+# (https://www.conventionalcommits.org/). Used by .github/workflows/release.yml.
+
+[changelog]
+# No "# Changelog" heading: the output is used directly as GitHub release notes.
+header = ""
+body = """
+{% if version %}## What's Changed in {{ version }}{% else %}## What's Changed{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}- {{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
+{% endfor %}{% endfor %}"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+# Non-conventional commits (if any ever slip in) are still listed instead of
+# being silently dropped.
+filter_unconventional = false
+# Only semver release tags participate in commit range calculation.
+tag_pattern = "^v[0-9]"
+# Oldest first, so release notes read chronologically.
+sort_commits = "oldest"
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactoring" },
+    { message = "^docs", group = "Documentation" },
+    # Internal changes (tests, CI, chores, styling) are not user-facing.
+    { message = "^test|^ci|^chore|^style", skip = true },
+    { message = "^revert", group = "Revert" },
+    # Catch-all for anything that is not conventional (and not skipped above).
+    { message = ".*", group = "Other" },
+]

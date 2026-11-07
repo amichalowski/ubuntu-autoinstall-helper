@@ -1,0 +1,118 @@
+name: Release
+
+# Releases are driven by semver tags pushed to the repository:
+#   stable:     vX.Y.Z        (e.g. v0.1.0)
+#   prerelease: vX.Y.Z-rc.N   (e.g. v0.1.0-rc.1)
+on:
+  push:
+    tags: ["v*"]
+
+# A tag push must always complete: never cancel an in-flight release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # 1. Quality gate: the same tests + ruff as regular CI, executed on the
+  #    tagged commit BEFORE any artifact is built.
+  ci:
+    permissions:
+      contents: read
+      checks: write
+    uses: ./.github/workflows/ci.yml
+
+  # 2. Build the standalone zipapp and upload it as a workflow artifact.
+  build:
+    name: Build zipapp
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history + tags: git-cliff needs them to compute commit ranges.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies (uv.lock)
+        run: uv sync --locked
+
+      # The tag is the source of truth: refuse to release when pyproject.toml
+      # still points at another version. Prerelease suffixes are ignored,
+      # i.e. v0.1.0-rc.1 requires version 0.1.0 in pyproject.toml.
+      - name: Verify tag matches pyproject.toml version
+        run: |
+          tag_base="${GITHUB_REF_NAME#v}"
+          tag_base="${tag_base%%-*}"
+          project_version="$(uv version --short)"
+          if [ "$tag_base" != "$project_version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${project_version}"
+            exit 1
+          fi
+
+      - name: Build .pyz
+        run: uv run build-pyz -o "dist/autoinstall-helper-${GITHUB_REF_NAME}.pyz"
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum ./* > SHA256SUMS
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: dist/
+          if-no-files-found: error
+
+  # 3. Generate release notes from Conventional Commits and publish the
+  #    GitHub Release with the build artifacts attached.
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history + tags: required by git-cliff.
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Generate release notes (git-cliff)
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Tags carrying a semver prerelease suffix (-rc.1, -beta.2, ...) are
+          # published as prereleases and excluded from "Latest".
+          flags=(--title "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md)
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            flags+=(--prerelease)
+          fi
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            # Re-run on an existing release: refresh the attached assets.
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* "${flags[@]}"
+          fi
