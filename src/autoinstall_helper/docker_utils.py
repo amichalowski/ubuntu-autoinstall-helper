@@ -8,8 +8,6 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from autoinstall_helper.config import has_cloud_config_header
-
 DOCKER_IMAGE_REPO = "ubuntu-desktop-bootstrap"
 
 # Validator assets hashed into the image tag; order is significant and must stay stable.
@@ -188,9 +186,6 @@ def docker_validate(tag: str, config_file: Path, validation: str) -> int:
         "--validation",
         validation,
     ]
-    if not has_cloud_config_header(config_file):
-        cmd.append("--no-expect-cloudconfig")
-
     print(f"[autoinstall-helper] Validating '{config_file.name}' in container '{tag}'...")
     result = subprocess.run(cmd, check=False)
     return result.returncode

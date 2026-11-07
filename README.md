@@ -219,6 +219,9 @@ You can run commands either via `uv run autoinstall-helper` (in dev) or via `./a
 
 Reads the installer channel from the YAML file, queries the Snap Store API for the exact package version, builds the Docker container (if not already cached), and runs multi-layer validation:
 
+> [!IMPORTANT]
+> The file **must** start with the `#cloud-config` header. Without it the command fails immediately with a clear error, before contacting the Snap Store or Docker.
+
 ```bash
 # Validate a specific autoinstall configuration
 uv run autoinstall-helper validate path/to/your-autoinstall.yaml

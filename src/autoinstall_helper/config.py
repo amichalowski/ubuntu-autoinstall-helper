@@ -21,3 +21,19 @@ def has_cloud_config_header(config_file: Path) -> bool:
             return f.readline().strip() == "#cloud-config"
     except OSError:
         return False
+
+
+def require_cloud_config_header(config_file: Path) -> None:
+    """Exit with a clear message when the file lacks the '#cloud-config' header.
+
+    An autoinstall file is delivered as cloud-config, so the header is mandatory:
+    without it the top-level 'autoinstall' key would be ignored by the installer.
+    """
+    if not has_cloud_config_header(config_file):
+        raise SystemExit(
+            f"ERROR: File '{config_file}' must start with the '#cloud-config' header.\n"
+            f"An autoinstall file is delivered as cloud-config, e.g.:\n"
+            f"  #cloud-config\n"
+            f"  autoinstall:\n"
+            f"    version: 1"
+        )

@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 from autoinstall_helper.cidata import extract, inject
-from autoinstall_helper.config import extract_installer_channel
+from autoinstall_helper.config import extract_installer_channel, require_cloud_config_header
 from autoinstall_helper.disk import _is_block_device
 from autoinstall_helper.docker_utils import (
     _get_docker_dir,
@@ -56,6 +56,7 @@ def validate(config_file: Path, validation: str = "full") -> int:
         raise SystemExit(f"ERROR: File does not exist: {config_file}")
 
     print(f"[autoinstall-helper] Reading: {config_file}")
+    require_cloud_config_header(config_file)
     channel = extract_installer_channel(config_file)
     print(f"[autoinstall-helper] Installer channel: {channel}")
 

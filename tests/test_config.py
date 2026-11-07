@@ -7,6 +7,7 @@ import pytest
 from autoinstall_helper.config import (
     extract_installer_channel,
     has_cloud_config_header,
+    require_cloud_config_header,
 )
 
 
@@ -36,6 +37,29 @@ class TestHasCloudConfigHeader:
     def test_nonexistent_file(self, tmp_path: Path):
         cfg = tmp_path / "nonexistent.yaml"
         assert has_cloud_config_header(cfg) is False
+
+
+class TestRequireCloudConfigHeader:
+    """Tests for require_cloud_config_header(config_file)."""
+
+    def test_valid_header_passes(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text("#cloud-config\nautoinstall:\n  version: 1\n", encoding="utf-8")
+        require_cloud_config_header(cfg)  # must not raise
+
+    def test_missing_header_raises(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text("autoinstall:\n  version: 1\n", encoding="utf-8")
+        with pytest.raises(SystemExit) as exc_info:
+            require_cloud_config_header(cfg)
+        assert "#cloud-config" in str(exc_info.value)
+
+    def test_different_comment_raises(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text("#not-cloud-config\nautoinstall:\n  version: 1\n", encoding="utf-8")
+        with pytest.raises(SystemExit) as exc_info:
+            require_cloud_config_header(cfg)
+        assert "#cloud-config" in str(exc_info.value)
 
 
 class TestExtractInstallerChannel:
