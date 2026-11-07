@@ -22,6 +22,15 @@ dev = [
     "ruff>=0.17.3",
 ]
 
+[tool.pytest.ini_options]
+# Smoke tests (tests/smoke/) execute the built .pyz artifact end-to-end and
+# require Docker and network access; they are excluded from the default run.
+# Execute them explicitly with: uv run pytest -m smoke
+markers = [
+    "smoke: end-to-end tests against the built .pyz artifact (require Docker and network)",
+]
+addopts = "-m 'not smoke'"
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"

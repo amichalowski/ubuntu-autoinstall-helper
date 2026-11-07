@@ -22,6 +22,7 @@ Repository guidelines for AI agents working on **autoinstall-helper**.
 ## Testing Conventions
 
 - Run tests via `uv run pytest`.
+- Smoke tests live in `tests/smoke/` and carry the `smoke` marker. They execute the built `.pyz` artifact end-to-end and require Docker and network access, so they are excluded from the default `uv run pytest` run—execute them explicitly with `uv run pytest -m smoke` (after building the artifact, see README).
 - Mock at the point of **usage** (e.g., `autoinstall_helper.flash.subprocess.run`), not definition.
 - Use pytest's built-in `tmp_path` fixture for any file/directory I/O tests.
 - Never perform real block device operations, network calls, or Docker invocations during unit tests—mock system boundaries (`subprocess.run`, `urllib.request.urlopen`, `losetup`, `parted`).

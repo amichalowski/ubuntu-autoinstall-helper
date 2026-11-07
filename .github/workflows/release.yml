@@ -62,7 +62,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum ./* > SHA256SUMS
+          sha256sum "autoinstall-helper-${GITHUB_REF_NAME}.pyz" > SHA256SUMS
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
@@ -71,11 +71,61 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # 3. Generate release notes from Conventional Commits and publish the
+  # 3. Smoke test the built artifact: the known-bad autoinstall config must be
+  #    rejected by the packaged .pyz. GitHub-hosted runners ship with Docker on
+  #    the VM itself, so no docker-in-docker service is required here.
+  smoke:
+    name: Smoke test (.pyz + Docker)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # dorny/test-reporter creates a Check Run with smoke test results.
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies (uv.lock)
+        run: uv sync --locked
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Smoke test the built artifact
+        run: uv run pytest -m smoke -v --junitxml=junit/smoke-results.xml
+
+      # dorny/test-reporter parses JUnit XML and publishes a native Check Run:
+      # annotations on failed smoke tests and a results section in the Summary.
+      - name: Publish smoke test results
+        if: ${{ !cancelled() }}
+        uses: dorny/test-reporter@v3
+        with:
+          name: Smoke Test Results
+          path: junit/smoke-results.xml
+          reporter: python-xunit
+
+      # Raw JUnit XML as a downloadable artifact (debugging).
+      - name: Upload smoke test results (JUnit)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-test-results-pytest
+          path: junit/smoke-results.xml
+
+  # 4. Generate release notes from Conventional Commits and publish the
   #    GitHub Release with the build artifacts attached.
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: smoke
     runs-on: ubuntu-latest
     permissions:
       contents: write
