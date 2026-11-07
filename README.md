@@ -8,6 +8,8 @@
 [![Platform: Ubuntu](https://img.shields.io/badge/platform-Ubuntu-E95420?logo=ubuntu&logoColor=white)](https://github.com/amichalowski/ubuntu-autoinstall-helper#system-requirements)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://conventionalcommits.org)
 [![Linted & Formatted with Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Works On My Machine](https://forthebadge.com/badges/works-on-my-machine.svg)](https://forthebadge.com)
+[![Uses Badges](https://forthebadge.com/badges/uses-badges.svg)](https://forthebadge.com)
 
 > [!NOTE]
 > **Project Background & Vibecoding Disclaimer**  
