@@ -1,11 +1,13 @@
 """Embedding and reading autoinstall.yaml in the cidata (FAT32) partition."""
 
 import contextlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 from autoinstall_helper.disk import _fix_gpt_backup_header, _is_block_device
@@ -49,26 +51,32 @@ def _loop_context(image: Path):
         print(f"[autoinstall-helper] Detached: {loop_dev}")
 
 
-def _parse_pairs(line: str) -> dict[str, str]:
-    """Parse the KEY=\"VALUE\" format returned by e.g. lsblk -P."""
-    return dict(re.findall(r'(\w+)="([^"]*)"', line))
+def _lsblk_devices(*args: str) -> list[dict]:
+    """Run lsblk with JSON output and return the top-level ``blockdevices`` list."""
+    res = subprocess.run(
+        ["lsblk", "-J", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        return json.loads(res.stdout).get("blockdevices", [])
+    except json.JSONDecodeError:
+        return []
+
+
+def _iter_devices(devices: list[dict]) -> Iterator[dict]:
+    """Yield each device and all of its descendants (depth-first)."""
+    for dev in devices:
+        yield dev
+        yield from _iter_devices(dev.get("children") or [])
 
 
 def _get_partitions(disk: str) -> list[str]:
     """Return a list of paths to all partitions on the given disk/image."""
     subprocess.run(["udevadm", "settle"], capture_output=True, check=False)
-    res = subprocess.run(
-        ["lsblk", "-np", "-o", "PATH,TYPE", disk],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    partitions = []
-    for line in res.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] == "part":
-            partitions.append(parts[0])
-    return partitions
+    devices = _lsblk_devices("-p", "-o", "PATH,TYPE", disk)
+    return [dev["path"] for dev in _iter_devices(devices) if dev.get("type") == "part" and dev.get("path")]
 
 
 def _get_disk_size_and_last_end(disk: str) -> tuple[float | None, float | None]:
@@ -114,17 +122,10 @@ def _find_cidata_partition(disk: str) -> str | None:
     subprocess.run(["udevadm", "settle"], capture_output=True, check=False)
 
     # 1. Check via lsblk (LABEL and PARTLABEL)
-    lsblk = subprocess.run(
-        ["lsblk", "-npP", "-o", "PATH,LABEL,PARTLABEL", disk],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    for line in lsblk.stdout.splitlines():
-        info = _parse_pairs(line)
-        path = info.get("PATH", "")
-        label = info.get("LABEL", "").lower()
-        partlabel = info.get("PARTLABEL", "").lower()
+    for dev in _iter_devices(_lsblk_devices("-p", "-o", "PATH,LABEL,PARTLABEL", disk)):
+        path = dev.get("path", "")
+        label = (dev.get("label") or "").lower()
+        partlabel = (dev.get("partlabel") or "").lower()
         if path != disk and (label == CIDATA_LABEL or partlabel == CIDATA_LABEL):
             return path
 
@@ -246,18 +247,8 @@ def _ensure_cidata_partition(disk: str) -> str:
 
 def _find_last_partition(disk: str) -> str | None:
     """Return the path of the last partition on the disk."""
-    lsblk = subprocess.run(
-        ["lsblk", "-ln", "-o", "NAME", disk],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    parts = []
-    for line in lsblk.stdout.splitlines():
-        name = line.strip()
-        if name and name != disk.removeprefix("/dev/"):
-            parts.append(f"/dev/{name}")
-    return parts[-1] if parts else None
+    partitions = _get_partitions(disk)
+    return partitions[-1] if partitions else None
 
 
 @contextlib.contextmanager

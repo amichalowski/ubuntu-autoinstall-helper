@@ -1,36 +1,118 @@
 """Unit tests for pure helpers in autoinstall_helper.cidata."""
 
+import json
 from types import SimpleNamespace
 
 from autoinstall_helper import cidata
-from autoinstall_helper.cidata import _parse_pairs
 
 
-class TestParsePairs:
-    """Tests for _parse_pairs(line) - lsblk / udev format parsing."""
+class TestLsblkDevices:
+    """Tests for _lsblk_devices(*args) - lsblk JSON output parsing."""
 
-    def test_typical_lsblk_output(self):
-        line = 'PATH="/dev/sda" LABEL="cidata" PARTLABEL=""'
-        expected = {
-            "PATH": "/dev/sda",
-            "LABEL": "cidata",
-            "PARTLABEL": "",
-        }
-        assert _parse_pairs(line) == expected
+    def _patch_lsblk(self, monkeypatch, stdout: str):
+        monkeypatch.setattr(
+            cidata.subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(stdout=stdout, returncode=0),
+        )
 
-    def test_empty_line(self):
-        assert _parse_pairs("") == {}
+    def test_parses_json(self, monkeypatch):
+        stdout = json.dumps({"blockdevices": [{"path": "/dev/sda", "type": "disk"}]})
+        self._patch_lsblk(monkeypatch, stdout)
 
-    def test_line_without_quotes(self):
-        # Format KEY="VALUE" expects double quotes
-        assert _parse_pairs("KEY=VALUE ANOTHER=123") == {}
+        assert cidata._lsblk_devices("-p", "-o", "PATH,TYPE", "/dev/sda") == [
+            {"path": "/dev/sda", "type": "disk"},
+        ]
 
-    def test_whitespace_and_special_chars(self):
-        line = 'NAME="loop0p1" FSTYPE="vfat" MOUNTPOINT="/media/my mount"'
-        result = _parse_pairs(line)
-        assert result["NAME"] == "loop0p1"
-        assert result["FSTYPE"] == "vfat"
-        assert result["MOUNTPOINT"] == "/media/my mount"
+    def test_missing_blockdevices_key(self, monkeypatch):
+        self._patch_lsblk(monkeypatch, "{}")
+        assert cidata._lsblk_devices() == []
+
+    def test_invalid_json_returns_empty(self, monkeypatch):
+        self._patch_lsblk(monkeypatch, "not-json")
+        assert cidata._lsblk_devices() == []
+
+
+class TestIterDevices:
+    """Tests for _iter_devices(devices) - recursive blockdevice traversal."""
+
+    def test_flattens_nested_children(self):
+        devices = [
+            {
+                "path": "/dev/sda",
+                "children": [
+                    {"path": "/dev/sda1", "children": [{"path": "/dev/sda1p1"}]},
+                    {"path": "/dev/sda2"},
+                ],
+            }
+        ]
+        assert [dev["path"] for dev in cidata._iter_devices(devices)] == [
+            "/dev/sda",
+            "/dev/sda1",
+            "/dev/sda1p1",
+            "/dev/sda2",
+        ]
+
+    def test_empty(self):
+        assert list(cidata._iter_devices([])) == []
+
+
+class TestGetPartitions:
+    """Tests for _get_partitions(disk) / _find_last_partition(disk) - lsblk JSON."""
+
+    def _patch_lsblk(self, monkeypatch, blockdevices: list):
+        stdout = json.dumps({"blockdevices": blockdevices})
+        monkeypatch.setattr(
+            cidata.subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(stdout=stdout, returncode=0),
+        )
+
+    def test_returns_partition_paths(self, monkeypatch):
+        self._patch_lsblk(
+            monkeypatch,
+            [
+                {
+                    "path": "/dev/sda",
+                    "type": "disk",
+                    "children": [
+                        {"path": "/dev/sda1", "type": "part"},
+                        {"path": "/dev/sda2", "type": "part"},
+                    ],
+                }
+            ],
+        )
+        assert cidata._get_partitions("/dev/sda") == ["/dev/sda1", "/dev/sda2"]
+
+    def test_ignores_non_partition_devices(self, monkeypatch):
+        self._patch_lsblk(
+            monkeypatch,
+            [
+                {"path": "/dev/sda", "type": "disk"},
+                {"path": "/dev/sdb", "type": "loop"},
+            ],
+        )
+        assert cidata._get_partitions("/dev/sda") == []
+
+    def test_find_last_partition(self, monkeypatch):
+        self._patch_lsblk(
+            monkeypatch,
+            [
+                {
+                    "path": "/dev/sda",
+                    "type": "disk",
+                    "children": [
+                        {"path": "/dev/sda1", "type": "part"},
+                        {"path": "/dev/sda2", "type": "part"},
+                    ],
+                }
+            ],
+        )
+        assert cidata._find_last_partition("/dev/sda") == "/dev/sda2"
+
+    def test_find_last_partition_none(self, monkeypatch):
+        self._patch_lsblk(monkeypatch, [{"path": "/dev/sda", "type": "disk"}])
+        assert cidata._find_last_partition("/dev/sda") is None
 
 
 class TestGetDiskSizeAndLastEnd:
