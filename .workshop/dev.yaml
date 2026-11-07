@@ -8,7 +8,7 @@ sdks:
   - name: agy
     channel: latest/stable
   - name: opencode
-    channel: latest/stable
+    channel: 2/stable
     plugs:
       git-config:
         interface: mount
