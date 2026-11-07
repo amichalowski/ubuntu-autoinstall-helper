@@ -10,10 +10,13 @@
 [![Linted & Formatted with Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 
-[![Works On My Machine](https://forthebadge.com/badges/works-on-my-machine.svg)](https://forthebadge.com)
 [![Uses Badges](https://forthebadge.com/badges/uses-badges.svg)](https://forthebadge.com)
-[![Powered By Coffee](/badges/powered-by-coffee.svg)](https://forthebadge.com)
+[![Powered By Coffee](https://forthebadge.com/badges/powered-by-coffee.svg)](https://forthebadge.com)
 [![Uses Git](https://forthebadge.com/badges/uses-git.svg)](https://forthebadge.com)
+
+
+[![Works On My Machine](https://forthebadge.com/badges/works-on-my-machine.svg)](https://forthebadge.com)
+
 
 > [!NOTE]
 > **Project Background & Vibecoding Disclaimer**  
