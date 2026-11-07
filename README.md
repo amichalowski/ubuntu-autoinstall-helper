@@ -1,7 +1,11 @@
 # Ubuntu Autoinstall Helper & Validator
 
 [![CI](https://github.com/amichalowski/ubuntu-autoinstall-helper/actions/workflows/ci.yml/badge.svg)](https://github.com/amichalowski/ubuntu-autoinstall-helper/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/amichalowski/ubuntu-autoinstall-helper)](https://github.com/amichalowski/ubuntu-autoinstall-helper/releases)
+[![Release](https://github.com/amichalowski/ubuntu-autoinstall-helper/actions/workflows/release.yml/badge.svg)](https://github.com/amichalowski/ubuntu-autoinstall-helper/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/amichalowski/ubuntu-autoinstall-helper?include_prereleases)](https://github.com/amichalowski/ubuntu-autoinstall-helper/releases)
+[![License: MIT](https://img.shields.io/github/license/amichalowski/ubuntu-autoinstall-helper)](https://github.com/amichalowski/ubuntu-autoinstall-helper/blob/main/LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://github.com/amichalowski/ubuntu-autoinstall-helper#system-requirements)
+[![Platform: Ubuntu](https://img.shields.io/badge/platform-Ubuntu-E95420?logo=ubuntu&logoColor=white)](https://github.com/amichalowski/ubuntu-autoinstall-helper#system-requirements)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://conventionalcommits.org)
 [![Linted & Formatted with Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
