@@ -54,6 +54,28 @@ class TestBuildZipapp:
         assert proc.returncode == 0
         assert "autoinstall-helper" in proc.stdout
 
+    def test_build_zipapp_propagates_exit_code(self, tmp_path: Path):
+        """The generated __main__.py must exit with the entry point's status code."""
+        src = tmp_path / "src"
+        package = src / "autoinstall_helper"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "cli.py").write_text(
+            "import sys\n\n\ndef main():\n    return 3\n\n\ndef zipapp_main():\n    sys.exit(main())\n",
+            encoding="utf-8",
+        )
+
+        target_pyz = tmp_path / "exit-code.pyz"
+        build_zipapp(target=target_pyz, src_dir=src)
+
+        proc = subprocess.run(
+            [sys.executable, str(target_pyz)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 3, proc.stderr
+
 
 class TestDockerDigestAndTag:
     """Tests for get_docker_digest and docker_image_tag."""

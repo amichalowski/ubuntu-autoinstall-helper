@@ -217,5 +217,14 @@ def main() -> int:
     return 0
 
 
+def zipapp_main() -> None:
+    """Entry point for the standalone zipapp (.pyz).
+
+    zipapp's generated __main__.py calls the entry point without sys.exit(),
+    so the status code returned by main() must be raised explicitly here.
+    """
+    sys.exit(main())
+
+
 if __name__ == "__main__":
     sys.exit(main())

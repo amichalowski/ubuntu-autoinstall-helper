@@ -161,6 +161,19 @@ def test_cidata_inject_requires_root(monkeypatch, run, tmp_path):
         run("cidata", "inject", "disk.img")
 
 
+# ---------------------------------------------------------------------------
+# zipapp entry point
+# ---------------------------------------------------------------------------
+
+
+def test_zipapp_main_exits_with_command_status(monkeypatch):
+    """zipapp ignores return values, so the entry point must raise SystemExit."""
+    monkeypatch.setattr(cli, "main", lambda: 3)
+    with pytest.raises(SystemExit) as excinfo:
+        cli.zipapp_main()
+    assert excinfo.value.code == 3
+
+
 def test_cidata_extract_dispatch(monkeypatch, run, tmp_path):
     seen = {}
     monkeypatch.setattr(cli.os, "geteuid", lambda: 0)

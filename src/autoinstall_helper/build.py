@@ -50,7 +50,7 @@ def build_zipapp(
             source=src_path,
             target=target_path,
             interpreter="/usr/bin/env python3",
-            main="autoinstall_helper.cli:main",
+            main="autoinstall_helper.cli:zipapp_main",
             filter=exclude_pycache,
         )
     finally:
