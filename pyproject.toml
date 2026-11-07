@@ -16,6 +16,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "conventional-pre-commit>=4.5.0",
     "pre-commit>=4.0.0",
     "pytest>=9.2.0",
     "pyyaml>=6.0.3",

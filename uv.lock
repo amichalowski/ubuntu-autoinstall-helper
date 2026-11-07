@@ -13,6 +13,7 @@ source = { editable = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "conventional-pre-commit" },
     { name = "pre-commit", version = "4.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pre-commit", version = "4.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pytest" },
@@ -24,6 +25,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "conventional-pre-commit", specifier = ">=4.5.0" },
     { name = "pre-commit", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
@@ -46,6 +48,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+]
+
+[[package]]
+name = "conventional-pre-commit"
+version = "4.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/88/10e8daae487e373b44cf71cf95b333f2d0c8c7c5cfe79a4d95ad0117ee2e/conventional_pre_commit-4.5.0.tar.gz", hash = "sha256:cf7b018d435c3f47ea8b1e42c52169ad88fdde726603f0bf0e1bef7d27d8fd48", size = 27938, upload-time = "2026-10-29T19:35:58.129Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/db/c2cd84922c53f220249a50507bd134f13a4aa34465d21277c1e669f26c70/conventional_pre_commit-4.5.0-py3-none-any.whl", hash = "sha256:f4696da7be7998dff6b7fe33a7ff4d2e87fed18bd77967e26346628d99ed8f29", size = 16904, upload-time = "2026-10-29T19:35:56.871Z" },
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
-# Local hooks delegating to ruff from dev-dependencies (version pinned in uv.lock,
-# identical to CI), plus Conventional Commits validation of the commit message.
+# Local hooks delegating to tools from dev-dependencies (versions pinned in
+# uv.lock, identical to CI): ruff plus Conventional Commits validation.
 # One-time setup per clone installs both hook types (see default_install_hook_types):
 #   uv run pre-commit install
 default_install_hook_types: [pre-commit, commit-msg]
@@ -16,11 +16,11 @@ repos:
         entry: uv run ruff format --force-exclude
         language: system
         types: [python]
-  # Enforce Conventional Commits (https://www.conventionalcommits.org/) so every
-  # commit message maps to a parser in cliff.toml. Allowed types mirror cliff.toml.
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.5.0
-    hooks:
+      # Enforce Conventional Commits (https://www.conventionalcommits.org/) so every
+      # commit message maps to a parser in cliff.toml. Allowed types mirror cliff.toml.
       - id: conventional-pre-commit
+        name: conventional commit
+        entry: uv run conventional-pre-commit
+        language: system
         stages: [commit-msg]
         args: [feat, fix, perf, refactor, docs, test, ci, chore, style, revert]
