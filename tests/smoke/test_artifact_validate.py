@@ -36,6 +36,39 @@ def test_wrong_autoinstall_config_fails_validation(run_artifact):
     assert "Validation failed" in output, f"Unexpected failure (not a validation error):\n{output}"
 
 
+def test_storage_scope_rejects_wrong_config(run_artifact):
+    """--validation storage must run the storage layer and reject the bad config."""
+    proc = run_artifact("validate", str(WRONG_CONFIG), "--validation", "storage")
+
+    output = _output(proc)
+    assert proc.returncode != 0, f"Storage validation unexpectedly succeeded:\n{output}"
+    assert "[storage] Running Curtin schema validation" in output, output
+    assert "Validation failed" in output, output
+
+
+def test_autoinstall_scope_runs_subiquity_only(run_artifact):
+    """--validation autoinstall must skip the storage/Curtin layer.
+
+    The known-bad config only fails the storage layer (Subiquity's dry-run
+    ignores the invalid ``wipe`` value), so this asserts scope isolation rather
+    than the validation verdict.
+    """
+    proc = run_artifact("validate", str(WRONG_CONFIG), "--validation", "autoinstall")
+
+    output = _output(proc)
+    assert "[autoinstall] Running Subiquity dry-run validation" in output, output
+    assert "[storage] Running Curtin schema validation" not in output, output
+
+
+def test_validate_reuses_cached_docker_image(run_artifact):
+    """A second run must reuse the digest-tagged image instead of rebuilding it."""
+    run_artifact("validate", str(WRONG_CONFIG), "--validation", "storage")
+    proc = run_artifact("validate", str(WRONG_CONFIG), "--validation", "storage")
+
+    output = _output(proc)
+    assert "already exists" in output, f"Expected a cached image, got:\n{output}"
+
+
 def test_config_without_cloud_config_header_is_rejected(run_artifact, tmp_path):
     """A config without the '#cloud-config' header must be rejected on the host.
 
