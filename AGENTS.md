@@ -31,3 +31,7 @@ Repository guidelines for AI agents working on **autoinstall-helper**.
 - Run `uv run ruff check .` and `uv run ruff format --check .` before committing. CI (`.github/workflows/ci.yml`, `lint` job) enforces the same commands and fails otherwise.
 - Ruff version is pinned via `uv.lock`, so local hooks, developers, and CI always use the identical version.
 - Broad `except Exception` in CLI entry points and the Snap Store API fallback is an accepted pattern (`BLE001` globally ignored). Blocking `subprocess.run` calls must state intent explicitly: `check=True` or `check=False`.
+
+## Commits & Signing
+
+- **Never commit without an SSH signature.** The repository enforces signed commits (`commit.gpgsign = true`, `gpg.format = ssh`). If the signing key is not available (e.g. `ssh-add -l` reports "The agent has no identities" or `git commit` fails with "Couldn't find key in agent"), stop and ask the user to load the key into the ssh-agent, then retry. Do not work around it (no `--no-gpg-sign`, no `-c commit.gpgsign=false`, no changes to the signing configuration).
