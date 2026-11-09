@@ -25,4 +25,4 @@ def fix_gpt_backup_header(target: Path | str) -> None:
         res = subprocess.run(["sgdisk", "-e", target_str], capture_output=True, text=True, check=False)
         if res.returncode == 0:
             print(f"[autoinstall-helper] Adjusted the backup GPT header to the end of the medium ({target_str}).")
-    subprocess.run(["partprobe", target_str], capture_output=True, check=False)
+    subprocess.run(["partprobe", target_str], capture_output=True, text=True, check=False)

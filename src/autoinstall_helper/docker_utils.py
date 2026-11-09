@@ -78,6 +78,7 @@ def docker_image_exists(tag: str) -> bool:
     res = subprocess.run(
         ["docker", "image", "inspect", tag],
         capture_output=True,
+        text=True,
         check=False,
     )
     return res.returncode == 0

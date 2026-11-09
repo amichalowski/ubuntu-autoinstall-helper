@@ -22,7 +22,7 @@ def _run(*cmd: str, check: bool, capture: bool = False, **kwargs) -> subprocess.
         list(cmd),
         check=check,
         capture_output=capture,
-        text=capture,
+        text=True,
         **kwargs,
     )
 
@@ -85,7 +85,7 @@ def _iter_devices(devices: list[dict]) -> Iterator[dict]:
 
 def _get_partitions(disk: str) -> list[str]:
     """Return a list of paths to all partitions on the given disk/image."""
-    subprocess.run(["udevadm", "settle"], capture_output=True, check=False)
+    subprocess.run(["udevadm", "settle"], capture_output=True, text=True, check=False)
     devices = _lsblk_devices("-p", "-o", "PATH,TYPE", disk)
     return [dev["path"] for dev in _iter_devices(devices) if dev.get("type") == "part" and dev.get("path")]
 
@@ -131,7 +131,7 @@ def _find_cidata_partition(disk: str) -> str | None:
          all space up to the end of the disk, ensuring it does not have a conflicting
          non-FAT filesystem or other label.
     """
-    subprocess.run(["udevadm", "settle"], capture_output=True, check=False)
+    subprocess.run(["udevadm", "settle"], capture_output=True, text=True, check=False)
 
     # 1. Check via lsblk (LABEL and PARTLABEL)
     for dev in _iter_devices(_lsblk_devices("-p", "-o", "PATH,LABEL,PARTLABEL", disk)):
@@ -210,7 +210,7 @@ def _ensure_cidata_partition(disk: str) -> str:
     """
     # Make sure GPT sees the whole available disk/file size
     fix_gpt_backup_header(disk)
-    subprocess.run(["udevadm", "settle"], capture_output=True, check=False)
+    subprocess.run(["udevadm", "settle"], capture_output=True, text=True, check=False)
 
     existing = _find_cidata_partition(disk)
     if existing:
