@@ -6,6 +6,10 @@ Repository guidelines for AI agents working on **autoinstall-helper**.
 
 - **English only:** All source comments, docstrings, CLI help text, printed/error messages, configuration file comments, and documentation must be written in **English**. Do not add Polish (or any other non-English) text anywhere in the repository.
 
+## Development Philosophy
+
+- **No backwards compatibility baggage:** This is a private project moving fast (vibecoding). Feel free to refactor, simplify, rename, or redesign any internal abstractions or CLI behaviors without worrying about backwards compatibility or legacy shims. Clean, simple, and maintainable code always wins over backwards compatibility.
+
 ## Toolchain & Environment
 
 - **Package & environment manager:** Always use [`uv`](https://docs.astral.sh/uv/) (`uv run ...`). Do not use raw `pip` or manage system virtualenvs directly.
