@@ -221,6 +221,8 @@ def main() -> int:
         return 1
 
     try:
+        # Note: asyncio.run is required because Subiquity's validator API
+        # (make_app and verify_autoinstall) consists of async coroutines.
         return asyncio.run(validate(ai_data, args.validation, args.verbosity, validator))
     except Exception as exc:
         print(f"Validation failed: {exc}", file=sys.stderr)

@@ -2,12 +2,14 @@
 
 import json
 import platform
+import re
 import shutil
 import subprocess
 import urllib.error
 import urllib.request
 
 SNAP_NAME = "ubuntu-desktop-bootstrap"
+CHANNEL_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)*$")
 
 
 def _get_snap_version_from_api(snap_name: str, channel: str) -> str | None:
@@ -33,6 +35,7 @@ def _get_snap_version_from_api(snap_name: str, channel: str) -> str | None:
             if channel_entries:
                 return str(channel_entries[0].get("version"))
     except Exception:
+        # Network errors, timeouts, or API schema changes fall back to local `snap info` (BLE001 accepted pattern).
         return None
     return None
 
@@ -43,6 +46,11 @@ def get_snap_version(channel: str) -> str:
     It first queries the public Snap Store API (works on any distribution
     without snapd) and falls back to the local `snap info` command if offline.
     """
+    if not channel or not CHANNEL_PATTERN.match(channel):
+        raise SystemExit(
+            f"ERROR: Invalid channel name '{channel}'. Expected format like 'latest/stable' or '24.04/edge'."
+        )
+
     version = _get_snap_version_from_api(SNAP_NAME, channel)
     if version:
         return version
@@ -77,6 +85,8 @@ def get_base_image(version: str) -> str:
 
     Mapping: coreXX -> ubuntu:XX.04
     """
+    # Lazy import: pyyaml is available in Ubuntu environments (python3-yaml)
+    # and dev environments, but production code keeps zero hard dependencies in [project.dependencies].
     import yaml  # type: ignore[import-untyped]
 
     urls = [
@@ -99,8 +109,11 @@ def get_base_image(version: str) -> str:
         raise SystemExit(f"ERROR: snapcraft.yaml not found for version '{version}' in the Subiquity repo.")
 
     base = yaml.safe_load(content).get("base", "")
-    if not base.startswith("core"):
+    if not isinstance(base, str) or not base.startswith("core"):
         raise SystemExit(f"ERROR: Unexpected 'base' value in snapcraft.yaml: '{base}'")
 
     number = base.removeprefix("core")
+    if not number.isdigit():
+        raise SystemExit(f"ERROR: Unexpected 'base' value in snapcraft.yaml: '{base}'")
+
     return f"ubuntu:{number}.04"

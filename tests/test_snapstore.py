@@ -119,6 +119,19 @@ class TestGetSnapVersion:
         with pytest.raises(SystemExit, match="has no published version"):
             snapstore.get_snap_version("24.04/stable")
 
+    @pytest.mark.parametrize(
+        "invalid_channel",
+        [
+            "",
+            "bad channel",
+            "channel with spaces/stable",
+            "invalid;chars",
+        ],
+    )
+    def test_invalid_channel_name_exits(self, invalid_channel):
+        with pytest.raises(SystemExit, match="Invalid channel name"):
+            snapstore.get_snap_version(invalid_channel)
+
 
 class TestGetBaseImage:
     """Tests for get_base_image(version)."""
@@ -162,11 +175,19 @@ class TestGetBaseImage:
         with pytest.raises(SystemExit, match="snapcraft.yaml not found"):
             snapstore.get_base_image("2.0")
 
-    def test_unexpected_base_exits(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "invalid_base",
+        [
+            "not-a-core",
+            "core",
+            "core-dev",
+        ],
+    )
+    def test_unexpected_base_exits(self, monkeypatch, invalid_base):
         monkeypatch.setattr(
             snapstore.urllib.request,
             "urlopen",
-            lambda url, timeout=30: _FakeResponse("base: not-a-core\n"),
+            lambda url, timeout=30: _FakeResponse(f"base: {invalid_base}\n"),
         )
 
         with pytest.raises(SystemExit, match="Unexpected 'base' value"):

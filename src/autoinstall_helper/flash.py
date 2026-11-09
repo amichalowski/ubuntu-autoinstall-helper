@@ -4,10 +4,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from autoinstall_helper.disk import _fix_gpt_backup_header, _is_block_device
+from autoinstall_helper.disk import fix_gpt_backup_header, is_block_device
 
 # Extra space added when creating the target file (for the partition holding autoinstall.yaml)
 FLASH_EXTRA_BYTES = 128 * 1024 * 1024  # 128 MB
+FLASH_EXTRA_MB = FLASH_EXTRA_BYTES // (1024 * 1024)
 
 
 def _is_btrfs(path: Path) -> bool:
@@ -47,6 +48,10 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
     a file of size ISO + FLASH_EXTRA_BYTES via fallocate.
     On BTRFS filesystems the file gets the No-COW attribute (chattr +C).
     It calls sync after dd finishes.
+
+    Note: Writing to block devices requires administrator (root) privileges,
+    enforced at the CLI entry point. Flashing to a regular file does not
+    require root by design.
     """
     # ISO validation
     if not iso_path.exists():
@@ -57,7 +62,7 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
     iso_size = iso_path.stat().st_size
     print(f"[autoinstall-helper] ISO: {iso_path} ({iso_size / 1024**2:.1f} MB)")
 
-    target_is_block = _is_block_device(target)
+    target_is_block = is_block_device(target)
 
     if target_is_block:
         print(f"[autoinstall-helper] Target: block device {target}")
@@ -84,7 +89,7 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
         if current_size < total_size:
             print(
                 f"[autoinstall-helper] Target is an existing file {target} ({current_size / 1024**2:.1f} MB). "
-                f"Growing to {total_size / 1024**2:.1f} MB (ISO + 128 MB spare)..."
+                f"Growing to {total_size / 1024**2:.1f} MB (ISO + {FLASH_EXTRA_MB} MB spare)..."
             )
             _apply_nocow(target)
             subprocess.run(["fallocate", "-l", str(total_size), str(target)], check=True)
@@ -95,7 +100,7 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
         total_size = iso_size + FLASH_EXTRA_BYTES
         print(
             f"[autoinstall-helper] Target does not exist. Creating file "
-            f"{target} ({total_size / 1024**2:.1f} MB = ISO + 128 MB spare)..."
+            f"{target} ({total_size / 1024**2:.1f} MB = ISO + {FLASH_EXTRA_MB} MB spare)..."
         )
 
         # On BTRFS set the No-COW attribute before writing any data
@@ -125,7 +130,7 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
     subprocess.run(["sync"], check=True)
 
     # Repair the GPT after dd to the enlarged target
-    _fix_gpt_backup_header(target)
+    fix_gpt_backup_header(target)
 
     print(f"[autoinstall-helper] Flash completed successfully: {iso_path} → {target}")
     return 0

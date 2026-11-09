@@ -165,3 +165,64 @@ class TestGetDiskSizeAndLastEnd:
         disk_size, last_end = cidata._get_disk_size_and_last_end("/dev/sda")
         assert disk_size is None
         assert last_end is None
+
+
+class TestGetLastPartitionEnd:
+    """Tests for _get_last_partition_end(disk)."""
+
+    def test_returns_formatted_end(self, monkeypatch):
+        monkeypatch.setattr(cidata, "_get_disk_size_and_last_end", lambda disk: (16000.0, 8192.0))
+        assert cidata._get_last_partition_end("/dev/sda") == "8192MB"
+
+    def test_returns_float_formatted_end(self, monkeypatch):
+        monkeypatch.setattr(cidata, "_get_disk_size_and_last_end", lambda disk: (16000.0, 513.5))
+        assert cidata._get_last_partition_end("/dev/sda") == "513.5MB"
+
+    def test_raises_when_no_partition_end(self, monkeypatch):
+        import pytest
+
+        monkeypatch.setattr(cidata, "_get_disk_size_and_last_end", lambda disk: (16000.0, None))
+        with pytest.raises(SystemExit, match="Could not determine the end of the last partition"):
+            cidata._get_last_partition_end("/dev/sda")
+
+
+class TestFindCidataPartition:
+    """Tests for _find_cidata_partition(disk)."""
+
+    def test_find_by_lsblk_label(self, monkeypatch):
+        monkeypatch.setattr(
+            cidata,
+            "_lsblk_devices",
+            lambda *args: [{"path": "/dev/sda4", "label": "cidata", "partlabel": ""}],
+        )
+        assert cidata._find_cidata_partition("/dev/sda") == "/dev/sda4"
+
+    def test_trailing_partition_heuristic_ignores_ext4(self, monkeypatch):
+        monkeypatch.setattr(cidata, "_lsblk_devices", lambda *args: [])
+        monkeypatch.setattr(
+            cidata, "_get_partitions", lambda disk: ["/dev/sda1", "/dev/sda2", "/dev/sda3", "/dev/sda4"]
+        )
+        monkeypatch.setattr(cidata, "_get_disk_size_and_last_end", lambda disk: (16000.0, 15995.0))
+
+        def _fake_run(cmd, *args, **kwargs):
+            if cmd[0] == "blkid":
+                return SimpleNamespace(stdout="TYPE=ext4\nLABEL=rootfs\n")
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(cidata.subprocess, "run", _fake_run)
+        assert cidata._find_cidata_partition("/dev/sda") is None
+
+    def test_trailing_partition_heuristic_accepts_vfat(self, monkeypatch):
+        monkeypatch.setattr(cidata, "_lsblk_devices", lambda *args: [])
+        monkeypatch.setattr(
+            cidata, "_get_partitions", lambda disk: ["/dev/sda1", "/dev/sda2", "/dev/sda3", "/dev/sda4"]
+        )
+        monkeypatch.setattr(cidata, "_get_disk_size_and_last_end", lambda disk: (16000.0, 15995.0))
+
+        def _fake_run(cmd, *args, **kwargs):
+            if cmd[0] == "blkid":
+                return SimpleNamespace(stdout="TYPE=vfat\n")
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(cidata.subprocess, "run", _fake_run)
+        assert cidata._find_cidata_partition("/dev/sda") == "/dev/sda4"

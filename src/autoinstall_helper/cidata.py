@@ -10,13 +10,14 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-from autoinstall_helper.disk import _fix_gpt_backup_header, _is_block_device
+from autoinstall_helper.disk import fix_gpt_backup_header, is_block_device
 
 CIDATA_LABEL = "cidata"
+MIN_CIDATA_FREE_SPACE_MB = 10.0
 
 
-def _run(*cmd: str, check: bool = True, capture: bool = False, **kwargs) -> subprocess.CompletedProcess:
-    """Run a command, optionally capturing the output."""
+def _run(*cmd: str, check: bool, capture: bool = False, **kwargs) -> subprocess.CompletedProcess:
+    """Run a command with explicit check=True/False, optionally capturing the output."""
     return subprocess.run(
         list(cmd),
         check=check,
@@ -28,7 +29,7 @@ def _run(*cmd: str, check: bool = True, capture: bool = False, **kwargs) -> subp
 
 def _losetup_attach(image: Path) -> str:
     """Attach an image file to a loop device and return its path, e.g. /dev/loop46."""
-    result = _run("losetup", "-fP", "--show", str(image), capture=True)
+    result = _run("losetup", "-fP", "--show", str(image), check=True, capture=True)
     loop_dev = result.stdout.strip()
     subprocess.run(["udevadm", "settle"], check=False)
     return loop_dev
@@ -40,7 +41,7 @@ def _losetup_detach(loop_dev: str) -> None:
 
 
 @contextlib.contextmanager
-def _loop_context(image: Path):
+def _loop_context(image: Path) -> Iterator[str]:
     """Context manager: attach the image to a loop device and detach it on exit."""
     loop_dev = _losetup_attach(image)
     print(f"[autoinstall-helper] Image attached at: {loop_dev}")
@@ -49,6 +50,16 @@ def _loop_context(image: Path):
     finally:
         _losetup_detach(loop_dev)
         print(f"[autoinstall-helper] Detached: {loop_dev}")
+
+
+@contextlib.contextmanager
+def _target_disk_context(target: Path) -> Iterator[str]:
+    """Yield the disk or attached loop device path for the target."""
+    if target.is_file() and not is_block_device(target):
+        with _loop_context(target) as loop_dev:
+            yield loop_dev
+    else:
+        yield str(target)
 
 
 def _lsblk_devices(*args: str) -> list[dict]:
@@ -117,7 +128,8 @@ def _find_cidata_partition(disk: str) -> str | None:
       1. The filesystem label (LABEL) and partition label (PARTLABEL) via lsblk.
       2. Direct superblock probing via blkid -p (independent of the udev cache).
       3. The case where the medium already has an extra partition (no. > 3) taking up
-         all space up to the end of the disk (no room for another one).
+         all space up to the end of the disk, ensuring it does not have a conflicting
+         non-FAT filesystem or other label.
     """
     subprocess.run(["udevadm", "settle"], capture_output=True, check=False)
 
@@ -151,42 +163,41 @@ def _find_cidata_partition(disk: str) -> str | None:
     # 3. If an extra partition (> 3) already exists and reaches the end of the disk (no room for a new one)
     if len(partitions) > 3:
         disk_size, last_end = _get_disk_size_and_last_end(disk)
-        if disk_size is not None and last_end is not None and (disk_size - last_end) < 10.0:
+        if disk_size is not None and last_end is not None and (disk_size - last_end) < MIN_CIDATA_FREE_SPACE_MB:
             last_part = partitions[-1]
-            print(
-                f"[autoinstall-helper] Found an existing trailing partition {last_part} "
-                f"occupying all free space ({last_end:.0f}MB / {disk_size:.0f}MB) — assuming it is cidata."
+            b_res = subprocess.run(
+                ["blkid", "-p", "-o", "export", last_part],
+                capture_output=True,
+                text=True,
+                check=False,
             )
-            return last_part
+            b_info = {}
+            for b_line in b_res.stdout.splitlines():
+                if "=" in b_line:
+                    k, v = b_line.split("=", 1)
+                    b_info[k.strip()] = v.strip()
+            fs_type = b_info.get("TYPE", "").lower()
+            label = b_info.get("LABEL", "").lower()
+            partlabel = b_info.get("PARTLABEL", "").lower()
+            # Only consider it if it does not have an explicit conflicting label or non-FAT filesystem
+            if fs_type in ("", "vfat", "msdos") and label in ("", CIDATA_LABEL) and partlabel in ("", CIDATA_LABEL):
+                print(
+                    f"[autoinstall-helper] Found an existing trailing partition {last_part} "
+                    f"occupying all free space ({last_end:.0f}MB / {disk_size:.0f}MB) — assuming it is cidata."
+                )
+                return last_part
 
     return None
 
 
 def _get_last_partition_end(disk: str) -> str:
     """Return the end of the last partition in MB (as a string to pass to parted)."""
-    env = dict(os.environ, LC_ALL="C")
-    result = _run(
-        "parted",
-        disk,
-        "--script",
-        "unit",
-        "MB",
-        "print",
-        capture=True,
-        check=False,
-        env=env,
-    )
-    last_end = None
-    for line in result.stdout.splitlines():
-        stripped = line.strip()
-        if stripped and stripped[0].isdigit():
-            # Format: "Number  Start  End  ..."
-            tokens = stripped.split()
-            if len(tokens) >= 3:
-                last_end = tokens[2]
+    _, last_end = _get_disk_size_and_last_end(disk)
     if last_end is None:
         raise SystemExit("ERROR: Could not determine the end of the last partition (parted print).")
-    return last_end
+    if last_end.is_integer():
+        return f"{int(last_end)}MB"
+    return f"{last_end}MB"
 
 
 def _ensure_cidata_partition(disk: str) -> str:
@@ -198,50 +209,58 @@ def _ensure_cidata_partition(disk: str) -> str:
     It always returns the partition path.
     """
     # Make sure GPT sees the whole available disk/file size
-    _fix_gpt_backup_header(disk)
+    fix_gpt_backup_header(disk)
     subprocess.run(["udevadm", "settle"], capture_output=True, check=False)
 
     existing = _find_cidata_partition(disk)
     if existing:
         print(f"[autoinstall-helper] Using cidata partition: {existing} — formatting FAT32...")
-        _run("mkfs.vfat", "-F", "32", "-n", CIDATA_LABEL, existing)
+        _run("mkfs.vfat", "-F", "32", "-n", CIDATA_LABEL, existing, check=True)
         return existing
 
     # Check whether there is enough free space for a new partition
     disk_size, last_end_mb = _get_disk_size_and_last_end(disk)
     if disk_size is not None and last_end_mb is not None:
         free_mb = disk_size - last_end_mb
-        if free_mb < 10.0:
+        if free_mb < MIN_CIDATA_FREE_SPACE_MB:
             raise SystemExit(
                 f"ERROR: Not enough free space on disk {disk} to create the 'cidata' partition.\n"
                 f"Disk: {disk_size:.0f} MB, end of last partition: {last_end_mb:.0f} MB (free: {free_mb:.1f} MB).\n"
                 f"If the medium is an image file, grow it (fallocate/truncate), or point to an existing partition."
             )
 
+    if last_end_mb is None:
+        raise SystemExit("ERROR: Could not determine the end of the last partition (parted print).")
+
     # Create a new partition at the end
     print("[autoinstall-helper] No 'cidata' partition found — creating a new one at the end of the disk...")
-    last_end = _get_last_partition_end(disk)
+    last_end = f"{int(last_end_mb)}MB" if last_end_mb.is_integer() else f"{last_end_mb}MB"
+    partitions_before = _get_partitions(disk)
     _run(
         "parted",
         disk,
         "--script",
+        "unit",
+        "MB",
         "mkpart",
         CIDATA_LABEL,
         "fat32",
         last_end,
         "100%",
+        check=True,
     )
     # Force the kernel to re-read the partition table
     subprocess.run(["partprobe", disk], check=False)
     subprocess.run(["udevadm", "settle"], check=False)
 
-    # Determine the number of the new (last) partition
-    part_path = _find_last_partition(disk)
-    if not part_path:
-        raise SystemExit("ERROR: Could not find the newly created partition.")
+    # Determine the number of the new (last) partition and verify count increased
+    partitions_after = _get_partitions(disk)
+    if len(partitions_after) <= len(partitions_before):
+        raise SystemExit(f"ERROR: Failed to create 'cidata' partition on {disk} (partition count did not increase).")
 
+    part_path = partitions_after[-1]
     print(f"[autoinstall-helper] Formatting {part_path} as FAT32 (label: {CIDATA_LABEL})...")
-    _run("mkfs.vfat", "-F", "32", "-n", CIDATA_LABEL, part_path)
+    _run("mkfs.vfat", "-F", "32", "-n", CIDATA_LABEL, part_path, check=True)
     return part_path
 
 
@@ -252,15 +271,15 @@ def _find_last_partition(disk: str) -> str | None:
 
 
 @contextlib.contextmanager
-def _mount_context(partition: str):
+def _mount_context(partition: str) -> Iterator[Path]:
     """Context manager: mount the partition in a temporary directory and unmount it on exit."""
     mount_point = Path(tempfile.mkdtemp(prefix="cidata_mount_"))
     print(f"[autoinstall-helper] Mounting {partition} → {mount_point}")
-    _run("mount", partition, str(mount_point))
+    _run("mount", partition, str(mount_point), check=True)
     try:
         yield mount_point
     finally:
-        _run("sync")
+        _run("sync", check=True)
         _run("umount", str(mount_point), check=False)
         shutil.rmtree(mount_point, ignore_errors=True)
         print(f"[autoinstall-helper] Unmounted and removed directory {mount_point}.")
@@ -278,17 +297,7 @@ def inject(target: Path, yaml_path: Path) -> int:
     if not target.exists():
         raise SystemExit(f"ERROR: Target does not exist: {target}")
 
-    is_image_file = target.is_file() and not _is_block_device(target)
-
-    if is_image_file:
-        # Image file → attach via losetup
-        with _loop_context(target) as loop_dev:
-            part = _ensure_cidata_partition(loop_dev)
-            with _mount_context(part) as mnt:
-                _write_cidata(yaml_path, mnt)
-    else:
-        # Block device → directly
-        disk = str(target)
+    with _target_disk_context(target) as disk:
         part = _ensure_cidata_partition(disk)
         with _mount_context(part) as mnt:
             _write_cidata(yaml_path, mnt)
@@ -323,20 +332,11 @@ def extract(target: Path, yaml_path: Path) -> int:
     if yaml_path.exists() and yaml_path.is_dir():
         raise SystemExit(f"ERROR: The given output path is a directory: {yaml_path}")
 
-    is_image_file = target.is_file() and not _is_block_device(target)
-
-    if is_image_file:
-        with _loop_context(target) as loop_dev:
-            part = _find_cidata_partition(loop_dev)
-            if not part:
-                raise SystemExit(f"ERROR: 'cidata' partition not found in image {target}.")
-            with _mount_context(part) as mnt:
-                _read_cidata(mnt, yaml_path)
-    else:
-        disk = str(target)
+    with _target_disk_context(target) as disk:
         part = _find_cidata_partition(disk)
         if not part:
-            raise SystemExit(f"ERROR: 'cidata' partition not found on device {target}.")
+            target_desc = "image" if target.is_file() and not is_block_device(target) else "device"
+            raise SystemExit(f"ERROR: 'cidata' partition not found on {target_desc} {target}.")
         with _mount_context(part) as mnt:
             _read_cidata(mnt, yaml_path)
 

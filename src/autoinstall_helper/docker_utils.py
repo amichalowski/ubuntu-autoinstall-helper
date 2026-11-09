@@ -1,6 +1,7 @@
 """Management of the validator Docker image and docker/ directory assets."""
 
 import atexit
+import functools
 import hashlib
 import shutil
 import subprocess
@@ -12,8 +13,6 @@ DOCKER_IMAGE_REPO = "ubuntu-desktop-bootstrap"
 
 # Validator assets hashed into the image tag; order is significant and must stay stable.
 DOCKER_ASSET_FILES = ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py")
-
-_DOCKER_DIR_CACHE: Path | None = None
 
 
 def compute_assets_digest(docker_dir: Path) -> str:
@@ -32,21 +31,17 @@ def compute_assets_digest(docker_dir: Path) -> str:
     return digest.hexdigest()[:12]
 
 
-def _get_docker_dir() -> Path:
+@functools.cache
+def get_docker_dir() -> Path:
     """Return the path to the docker/ directory.
 
     In development mode (unpacked) it returns the existing directory next to the module.
     In zipapp (.pyz) mode it extracts the docker/ directory contents into a temporary
     directory that is automatically removed when the program exits.
     """
-    global _DOCKER_DIR_CACHE
-    if _DOCKER_DIR_CACHE is not None and _DOCKER_DIR_CACHE.is_dir():
-        return _DOCKER_DIR_CACHE
-
     current_file = Path(__file__).resolve()
     candidate = current_file.parent / "docker"
     if candidate.is_dir() and (candidate / "Dockerfile").exists():
-        _DOCKER_DIR_CACHE = candidate
         return candidate
 
     archive_path: Path | None = None
@@ -73,13 +68,13 @@ def _get_docker_dir() -> Path:
                     perms = (info.external_attr >> 16) & 0o777
                     if perms:
                         target_file.chmod(perms)
-        _DOCKER_DIR_CACHE = tmp_dir
         return tmp_dir
 
     raise SystemExit(f"ERROR: 'docker' directory not found (looked in {candidate}).")
 
 
 def docker_image_exists(tag: str) -> bool:
+    """Check whether a Docker image with the given tag exists locally."""
     res = subprocess.run(
         ["docker", "image", "inspect", tag],
         capture_output=True,
@@ -88,32 +83,24 @@ def docker_image_exists(tag: str) -> bool:
     return res.returncode == 0
 
 
-_DOCKER_DIGEST_CACHE: str | None = None
-
-
+@functools.cache
 def get_docker_digest() -> str:
     """Return the 12-character SHA-256 digest of the container assets without writing to disk.
 
     1. In zipapp mode it reads the DOCKER_DIGEST file directly from the archive into RAM.
     2. In development mode it checks the DOCKER_DIGEST file next to the module or computes the digest on the fly.
     """
-    global _DOCKER_DIGEST_CACHE
-    if _DOCKER_DIGEST_CACHE is not None:
-        return _DOCKER_DIGEST_CACHE
-
     current_file = Path(__file__).resolve()
 
     # 1. Check whether the DOCKER_DIGEST file exists directly on disk (next to the module)
     digest_file = current_file.parent / "DOCKER_DIGEST"
     if digest_file.is_file():
-        _DOCKER_DIGEST_CACHE = digest_file.read_text(encoding="utf-8").strip()
-        return _DOCKER_DIGEST_CACHE
+        return digest_file.read_text(encoding="utf-8").strip()
 
     # 2. Development mode (docker/ directory on disk)
     docker_dir = current_file.parent / "docker"
     if docker_dir.is_dir() and (docker_dir / "Dockerfile").exists():
-        _DOCKER_DIGEST_CACHE = compute_assets_digest(docker_dir)
-        return _DOCKER_DIGEST_CACHE
+        return compute_assets_digest(docker_dir)
 
     # 3. Zipapp mode: read DOCKER_DIGEST directly from the zip archive without extracting
     for parent in [current_file] + list(current_file.parents):
@@ -122,8 +109,7 @@ def get_docker_digest() -> str:
                 with zipfile.ZipFile(parent) as zf:
                     namelist = zf.namelist()
                     if "autoinstall_helper/DOCKER_DIGEST" in namelist:
-                        _DOCKER_DIGEST_CACHE = zf.read("autoinstall_helper/DOCKER_DIGEST").decode("utf-8").strip()
-                        return _DOCKER_DIGEST_CACHE
+                        return zf.read("autoinstall_helper/DOCKER_DIGEST").decode("utf-8").strip()
                     # Emergency fallback: compute from files in the archive in RAM without creating tmp files
                     digest = hashlib.sha256()
                     for name in DOCKER_ASSET_FILES:
@@ -131,8 +117,7 @@ def get_docker_digest() -> str:
                         if entry in namelist:
                             digest.update(name.encode("utf-8"))
                             digest.update(zf.read(entry))
-                    _DOCKER_DIGEST_CACHE = digest.hexdigest()[:12]
-                    return _DOCKER_DIGEST_CACHE
+                    return digest.hexdigest()[:12]
         except (OSError, ValueError):
             continue
 
@@ -151,6 +136,7 @@ def docker_image_tag(version: str, digest_or_dockerfile: str | Path | None = Non
 
 
 def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> None:
+    """Build the validator Docker image with the specified tag and base image."""
     print(f"[autoinstall-helper] Building image '{tag}' (base: {base_image})...")
     subprocess.run(
         [
@@ -172,6 +158,7 @@ def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> N
 
 
 def docker_validate(tag: str, config_file: Path, validation: str) -> int:
+    """Run validation inside the Docker container and return the exit code."""
     container_path = "/data/autoinstall.yaml"
     cmd = [
         "docker",

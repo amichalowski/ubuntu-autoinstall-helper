@@ -28,13 +28,13 @@ from pathlib import Path
 
 from autoinstall_helper.cidata import extract, inject
 from autoinstall_helper.config import extract_installer_channel, require_cloud_config_header
-from autoinstall_helper.disk import _is_block_device
+from autoinstall_helper.disk import is_block_device
 from autoinstall_helper.docker_utils import (
-    _get_docker_dir,
     docker_build,
     docker_image_exists,
     docker_image_tag,
     docker_validate,
+    get_docker_dir,
 )
 from autoinstall_helper.flash import flash
 from autoinstall_helper.snapstore import get_base_image, get_snap_version
@@ -52,6 +52,7 @@ def _require_root(action: str) -> None:
 
 
 def validate(config_file: Path, validation: str = "full") -> int:
+    """Validate autoinstall.yaml against Subiquity and Curtin in a Docker container."""
     if not config_file.exists():
         raise SystemExit(f"ERROR: File does not exist: {config_file}")
 
@@ -67,7 +68,7 @@ def validate(config_file: Path, validation: str = "full") -> int:
     if docker_image_exists(tag):
         print(f"[autoinstall-helper] Image '{tag}' already exists.")
     else:
-        dockerfile = _get_docker_dir() / "Dockerfile"
+        dockerfile = get_docker_dir() / "Dockerfile"
         if not dockerfile.exists():
             raise SystemExit(f"ERROR: Dockerfile not found in {dockerfile.parent}")
         base_image = get_base_image(version)
@@ -82,7 +83,8 @@ def validate(config_file: Path, validation: str = "full") -> int:
     return rc
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the command-line argument parser for autoinstall-helper."""
     parser = argparse.ArgumentParser(
         prog="autoinstall-helper",
         description="Tool for managing autoinstall configuration and Ubuntu installation media.",
@@ -186,13 +188,19 @@ def main() -> int:
         help="Path to the output file (default: autoinstall.yaml)",
     )
 
-    args = parser.parse_args()
+    parser._cidata_parser = p_cidata  # type: ignore[attr-defined]
+    return parser
 
+
+def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Dispatch the parsed command-line arguments to the appropriate handler."""
     if args.subcommand == "validate":
         return validate(args.config, validation=args.validation)
 
     if args.subcommand == "flash":
-        if _is_block_device(args.target):
+        # Flashing to a physical block device requires root to prevent accidental overwrites,
+        # but creating/writing to a regular image file does not require root by design.
+        if is_block_device(args.target):
             _require_root("flash to a block device")
         return flash(args.iso, args.target, yes=args.yes)
 
@@ -211,11 +219,19 @@ def main() -> int:
         if args.cidata_subcommand == "extract":
             _require_root("cidata extract")
             return extract(args.target, args.output)
+        p_cidata = getattr(parser, "_cidata_parser", parser)
         p_cidata.print_help()
         return 0
 
     parser.print_help()
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main CLI entry point."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return dispatch(args, parser)
 
 
 def zipapp_main() -> None:

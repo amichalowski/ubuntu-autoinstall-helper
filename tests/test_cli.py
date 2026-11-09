@@ -56,7 +56,7 @@ def test_flash_on_file_no_root_required(monkeypatch, run, tmp_path):
     target.touch()
     seen = {}
 
-    monkeypatch.setattr(cli, "_is_block_device", lambda p: False)
+    monkeypatch.setattr(cli, "is_block_device", lambda p: False)
     monkeypatch.setattr(cli, "flash", lambda iso, target, yes: seen.update(iso=iso, target=target, yes=yes) or 0)
 
     rc = run("flash", "img.iso", str(target), "--yes")
@@ -67,7 +67,7 @@ def test_flash_on_file_no_root_required(monkeypatch, run, tmp_path):
 def test_flash_on_block_device_requires_root(monkeypatch, run, tmp_path):
     target = tmp_path / "dev"
 
-    monkeypatch.setattr(cli, "_is_block_device", lambda p: True)
+    monkeypatch.setattr(cli, "is_block_device", lambda p: True)
     monkeypatch.setattr(cli.os, "geteuid", lambda: 1000)
 
     with pytest.raises(SystemExit, match="root"):
@@ -78,7 +78,7 @@ def test_flash_on_block_device_with_root(monkeypatch, run, tmp_path):
     target = tmp_path / "dev"
     called = {}
 
-    monkeypatch.setattr(cli, "_is_block_device", lambda p: True)
+    monkeypatch.setattr(cli, "is_block_device", lambda p: True)
     monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
     monkeypatch.setattr(cli, "flash", lambda iso, target, yes: called.update(yes=yes) or 0)
 
@@ -201,3 +201,18 @@ def test_no_subcommand_prints_help(run, capsys):
     assert "validate" in out
     assert "flash" in out
     assert "cidata" in out
+
+
+def test_build_parser_has_all_commands():
+    parser = cli.build_parser()
+    subparsers_action = next(a for a in parser._actions if isinstance(a, cli.argparse._SubParsersAction))
+    choices = set(subparsers_action.choices.keys())
+    assert {"validate", "flash", "inject", "import", "extract", "export", "cidata"}.issubset(choices)
+
+
+def test_main_with_explicit_argv(monkeypatch):
+    called = {}
+    monkeypatch.setattr(cli, "validate", lambda cfg, validation: called.update(called=True) or 0)
+    rc = cli.main(["validate", "my_autoinstall.yaml"])
+    assert rc == 0
+    assert called == {"called": True}

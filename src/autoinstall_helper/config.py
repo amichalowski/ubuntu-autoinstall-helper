@@ -5,6 +5,8 @@ from pathlib import Path
 
 def extract_installer_channel(config_file: Path) -> str:
     """Extract the autoinstall.refresh-installer.channel value from the YAML file."""
+    # Lazy import: pyyaml is available in Ubuntu environments (python3-yaml)
+    # and dev environments, but production code keeps zero hard dependencies in [project.dependencies].
     import yaml  # type: ignore[import-untyped]
 
     data = yaml.safe_load(config_file.read_text(encoding="utf-8"))

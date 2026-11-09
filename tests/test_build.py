@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 
 from autoinstall_helper.build import build_zipapp, compute_docker_digest, exclude_pycache
-from autoinstall_helper.docker_utils import _get_docker_dir, docker_image_tag, get_docker_digest
+from autoinstall_helper.docker_utils import docker_image_tag, get_docker_digest, get_docker_dir
 
 
 class TestBuildZipapp:
@@ -126,10 +126,10 @@ class TestDockerDigestAndTag:
 
 
 class TestGetDockerDir:
-    """Tests for _get_docker_dir in development mode."""
+    """Tests for get_docker_dir in development mode."""
 
     def test_dev_mode_returns_existing_dir(self):
-        docker_dir = _get_docker_dir()
+        docker_dir = get_docker_dir()
         assert docker_dir.is_dir()
         assert (docker_dir / "Dockerfile").is_file()
         assert (docker_dir / "timedatectl.sh").is_file()

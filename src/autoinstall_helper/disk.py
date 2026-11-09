@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 
-def _is_block_device(path: Path) -> bool:
+def is_block_device(path: Path) -> bool:
     """Check whether the path points to a block device."""
     try:
         return path.stat().st_mode & 0o170000 == 0o060000
@@ -13,7 +13,7 @@ def _is_block_device(path: Path) -> bool:
         return False
 
 
-def _fix_gpt_backup_header(target: Path | str) -> None:
+def fix_gpt_backup_header(target: Path | str) -> None:
     """Move the backup GPT header to the physical end of the disk/image.
 
     After growing a file with fallocate or writing an ISO to a larger USB stick,
