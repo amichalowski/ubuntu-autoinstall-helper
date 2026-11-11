@@ -162,6 +162,77 @@ def test_cidata_inject_requires_root(monkeypatch, run, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# vm (libvirt virtual machines)
+# ---------------------------------------------------------------------------
+
+
+def test_vm_create_dispatch(monkeypatch, run, tmp_path):
+    media = tmp_path / "pendrive.img"
+    seen = {}
+    monkeypatch.setattr(cli.vm, "create", lambda spec, **kwargs: seen.update(spec=spec, **kwargs) or 0)
+
+    rc = run("vm", "create", "test-vm", "--media", str(media), "--disk-size", "20", "--no-tpm", "--wait")
+    assert rc == 0
+    spec = seen["spec"]
+    assert (spec.name, spec.media, spec.disk_size_gib, spec.tpm, spec.wait) == ("test-vm", media, 20, False, True)
+    assert seen["dry_run"] is False
+    assert seen["reinstall"] is False
+
+
+def test_vm_create_does_not_require_root(monkeypatch, run, tmp_path):
+    media = tmp_path / "pendrive.img"
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(cli.vm, "create", lambda spec, **kwargs: 0)
+    assert run("vm", "create", "test-vm", "--media", str(media)) == 0
+
+
+def test_vm_reinstall_dispatch(monkeypatch, run):
+    seen = {}
+    monkeypatch.setattr(cli.vm, "reinstall_domain", lambda name, **kwargs: seen.update(name=name, **kwargs) or 0)
+
+    assert run("vm", "reinstall", "test-vm", "--reset-disk", "--wait") == 0
+    assert seen["name"] == "test-vm"
+    assert seen["reset_disk"] is True
+    assert seen["wait"] is True
+
+
+def test_vm_eject_dispatch(monkeypatch, run):
+    seen = {}
+    monkeypatch.setattr(cli.vm, "eject", lambda name, **kwargs: seen.update(name=name, **kwargs) or 0)
+
+    assert run("vm", "eject", "test-vm", "--live-only", "--reboot") == 0
+    assert seen == {"name": "test-vm", "uri": None, "live_only": True, "reboot": True}
+
+
+def test_vm_delete_dispatch(monkeypatch, run):
+    seen = {}
+    monkeypatch.setattr(cli.vm, "delete", lambda name, **kwargs: seen.update(name=name, **kwargs) or 0)
+
+    assert run("vm", "delete", "test-vm", "--purge-disk", "-y") == 0
+    assert seen == {"name": "test-vm", "uri": None, "purge_disk": True, "yes": True}
+
+
+def test_vm_list_and_doctor_dispatch(monkeypatch, run):
+    calls = {}
+    monkeypatch.setattr(cli.vm, "list_domains", lambda **kwargs: calls.update(list=kwargs) or 0)
+    monkeypatch.setattr(cli.vm, "doctor", lambda uri: calls.update(doctor=uri) or 0)
+
+    assert run("vm", "list") == 0
+    assert calls["list"] == {"uri": None, "show_all": False}
+    assert run("vm", "list", "--all") == 0
+    assert calls["list"] == {"uri": None, "show_all": True}
+    assert run("vm", "doctor", "--uri", "qemu:///session") == 0
+    assert calls["doctor"] == "qemu:///session"
+
+
+def test_vm_without_action_prints_help(run, capsys):
+    assert run("vm") == 0
+    out = capsys.readouterr().out
+    assert "create" in out
+    assert "reinstall" in out
+
+
+# ---------------------------------------------------------------------------
 # zipapp entry point
 # ---------------------------------------------------------------------------
 
@@ -201,13 +272,14 @@ def test_no_subcommand_prints_help(run, capsys):
     assert "validate" in out
     assert "flash" in out
     assert "cidata" in out
+    assert "vm" in out
 
 
 def test_build_parser_has_all_commands():
     parser = cli.build_parser()
     subparsers_action = next(a for a in parser._actions if isinstance(a, cli.argparse._SubParsersAction))
     choices = set(subparsers_action.choices.keys())
-    assert {"validate", "flash", "inject", "import", "extract", "export", "cidata"}.issubset(choices)
+    assert {"validate", "flash", "inject", "import", "extract", "export", "cidata", "vm"}.issubset(choices)
 
 
 def test_main_with_explicit_argv(monkeypatch):

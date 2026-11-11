@@ -11,6 +11,9 @@ Available commands:
     target (block device or image file). If the partition does not exist,
     it is created at the end of the available space.
   - extract: reads user-data from the 'cidata' partition on the target and saves it to a file.
+  - vm: manages libvirt/QEMU virtual machines that boot an installation image
+    (e.g. pendrive.img) as a removable USB disk, to test the autoinstall flow
+    without physical hardware (create / eject / reinstall / delete / console / ...).
 
 The logic of each command lives in dedicated modules:
   - config.py       — autoinstall.yaml parsing
@@ -19,6 +22,7 @@ The logic of each command lives in dedicated modules:
   - flash.py        — writing the ISO to the medium
   - cidata.py       — cidata partition (inject / extract)
   - disk.py         — shared block device and GPT helpers
+  - vm.py           — libvirt virtual machines for testing installation media
 """
 
 import argparse
@@ -26,6 +30,7 @@ import os
 import sys
 from pathlib import Path
 
+from autoinstall_helper import vm
 from autoinstall_helper.cidata import extract, inject
 from autoinstall_helper.config import extract_installer_channel, require_cloud_config_header
 from autoinstall_helper.disk import is_block_device
@@ -188,8 +193,171 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the output file (default: autoinstall.yaml)",
     )
 
+    # vm group (libvirt virtual machines for testing installation media)
+    p_vm = subparsers.add_parser(
+        "vm",
+        help="Manage libvirt VMs that boot installation media (subcommands: create, eject, ...)",
+    )
+    vm_sub = p_vm.add_subparsers(dest="vm_subcommand", metavar="ACTION")
+
+    v_create = vm_sub.add_parser("create", help="Define and start a VM booting the installation media")
+    v_create.add_argument("name", help="VM (libvirt domain) name")
+    v_create.add_argument("--media", type=Path, required=True, help="Installation media image (e.g. pendrive.img)")
+    v_create.add_argument("--disk", type=Path, default=None, help="Existing target disk image to reuse")
+    v_create.add_argument(
+        "--disk-size",
+        type=int,
+        default=vm.DEFAULT_DISK_SIZE_GIB,
+        metavar="GiB",
+        help=f"Target disk size in GiB (default: {vm.DEFAULT_DISK_SIZE_GIB})",
+    )
+    v_create.add_argument(
+        "--memory",
+        type=int,
+        default=vm.DEFAULT_MEMORY_MB,
+        metavar="MB",
+        help=f"RAM in MB (default: {vm.DEFAULT_MEMORY_MB})",
+    )
+    v_create.add_argument("--vcpus", type=int, default=vm.DEFAULT_VCPUS, help="Number of virtual CPUs")
+    v_create.add_argument("--os-variant", default=vm.DEFAULT_OS_VARIANT, help="libvirt OS variant")
+    v_create.add_argument("--firmware", choices=("uefi", "bios"), default="uefi", help="Firmware type")
+    v_create.add_argument("--no-tpm", action="store_true", help="Do not add an emulated TPM 2.0 device")
+    v_create.add_argument(
+        "--network",
+        default="",
+        help="Network: 'default', 'user', or any libvirt 'key=value' specification",
+    )
+    v_create.add_argument("--graphics", choices=("spice", "vnc", "none"), default="spice", help="Console type")
+    v_create.add_argument("--serial", action="store_true", help="Add a serial console (needed for --graphics none)")
+    v_create.add_argument("--no-kvm", action="store_true", help="Force software emulation (TCG)")
+    v_create.add_argument(
+        "--wait",
+        action="store_true",
+        help="Attach to the console and wait instead of detaching the process (default: detach)",
+    )
+    v_create.add_argument(
+        "--reinstall",
+        action="store_true",
+        help="Reinstall on the existing disk when the domain already exists",
+    )
+    v_create.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+    v_create.add_argument("--dry-run", action="store_true", help="Print the virt-install command without running it")
+
+    v_eject = vm_sub.add_parser("eject", help="Eject the installation media from the VM")
+    v_eject.add_argument("name", help="VM (libvirt domain) name")
+    v_eject.add_argument("--live-only", action="store_true", help="Detach at runtime only (re-attached on restart)")
+    v_eject.add_argument("--reboot", action="store_true", help="Reboot the VM so it boots the installed system")
+    v_eject.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+
+    v_reinstall = vm_sub.add_parser("reinstall", help="Reinstall the OS on an existing VM disk")
+    v_reinstall.add_argument("name", help="VM (libvirt domain) name")
+    v_reinstall.add_argument("--media", type=Path, default=None, help="Media image to attach (default: the marker)")
+    v_reinstall.add_argument("--reset-disk", action="store_true", help="Recreate the target disk image before booting")
+    v_reinstall.add_argument("--wait", action="store_true", help="Attach to the console and wait")
+    v_reinstall.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+    v_reinstall.add_argument("--dry-run", action="store_true", help="Print the plan without changing anything")
+
+    v_delete = vm_sub.add_parser("delete", help="Remove the VM definition (keeps the installation media)")
+    v_delete.add_argument("name", help="VM (libvirt domain) name")
+    v_delete.add_argument("--purge-disk", action="store_true", help="Also delete the VM target disk image")
+    v_delete.add_argument("-y", "--yes", action="store_true", help="Skip confirmation before deleting the disk")
+    v_delete.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+
+    v_start = vm_sub.add_parser("start", help="Start a defined VM")
+    v_start.add_argument("name", help="VM (libvirt domain) name")
+    v_start.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+
+    v_stop = vm_sub.add_parser("stop", help="Shut down a VM")
+    v_stop.add_argument("name", help="VM (libvirt domain) name")
+    v_stop.add_argument("--force", action="store_true", help="Destroy the VM instead of a graceful shutdown")
+    v_stop.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+
+    v_restart = vm_sub.add_parser("restart", help="Reboot a running VM (or start a stopped one)")
+    v_restart.add_argument("name", help="VM (libvirt domain) name")
+    v_restart.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+
+    v_status = vm_sub.add_parser("status", help="Show the state, disks and media of a VM")
+    v_status.add_argument("name", help="VM (libvirt domain) name")
+    v_status.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+
+    v_console = vm_sub.add_parser("console", help="Open the graphical or serial console")
+    v_console.add_argument("name", help="VM (libvirt domain) name")
+    v_console.add_argument("--serial", action="store_true", help="Use the serial console (virsh console)")
+    v_console.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+
+    v_list = vm_sub.add_parser("list", help="List the VMs managed by autoinstall-helper")
+    v_list.add_argument("--all", action="store_true", help="Also list domains created outside autoinstall-helper")
+    v_list.add_argument("--uri", default=None, help="libvirt connection URI (default: auto-detect)")
+
+    v_doctor = vm_sub.add_parser("doctor", help="Check whether the host is ready to run VM tests")
+    v_doctor.add_argument("--uri", default=None, help="libvirt connection URI to check")
+
     parser._cidata_parser = p_cidata  # type: ignore[attr-defined]
+    parser._vm_parser = p_vm  # type: ignore[attr-defined]
     return parser
+
+
+def _dispatch_vm(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Dispatch the `vm` command group (libvirt virtual machines)."""
+    if args.vm_subcommand == "create":
+        spec = vm.VmSpec(
+            name=args.name,
+            media=args.media,
+            uri=args.uri or "",
+            disk=args.disk,
+            disk_size_gib=args.disk_size,
+            memory_mb=args.memory,
+            vcpus=args.vcpus,
+            os_variant=args.os_variant,
+            firmware=args.firmware,
+            tpm=not args.no_tpm,
+            network=args.network,
+            graphics=args.graphics,
+            serial=args.serial,
+            wait=args.wait,
+        )
+        return vm.create(spec, reinstall=args.reinstall, no_kvm=args.no_kvm, dry_run=args.dry_run)
+
+    if args.vm_subcommand == "eject":
+        return vm.eject(args.name, uri=args.uri, live_only=args.live_only, reboot=args.reboot)
+
+    if args.vm_subcommand == "reinstall":
+        return vm.reinstall_domain(
+            args.name,
+            media=args.media,
+            uri=args.uri,
+            reset_disk=args.reset_disk,
+            wait=args.wait,
+            dry_run=args.dry_run,
+        )
+
+    if args.vm_subcommand == "delete":
+        return vm.delete(args.name, uri=args.uri, purge_disk=args.purge_disk, yes=args.yes)
+
+    if args.vm_subcommand == "start":
+        return vm.start(args.name, uri=args.uri)
+
+    if args.vm_subcommand == "stop":
+        return vm.stop(args.name, uri=args.uri, force=args.force)
+
+    if args.vm_subcommand == "restart":
+        return vm.restart(args.name, uri=args.uri)
+
+    if args.vm_subcommand == "status":
+        return vm.status(args.name, uri=args.uri)
+
+    if args.vm_subcommand == "console":
+        return vm.console(args.name, uri=args.uri, serial=args.serial)
+
+    if args.vm_subcommand == "list":
+        return vm.list_domains(uri=args.uri, show_all=args.all)
+
+    if args.vm_subcommand == "doctor":
+        return vm.doctor(args.uri)
+
+    p_vm = getattr(parser, "_vm_parser", parser)
+    p_vm.print_help()
+    return 0
 
 
 def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
@@ -222,6 +390,9 @@ def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         p_cidata = getattr(parser, "_cidata_parser", parser)
         p_cidata.print_help()
         return 0
+
+    if args.subcommand == "vm":
+        return _dispatch_vm(args, parser)
 
     parser.print_help()
     return 0
