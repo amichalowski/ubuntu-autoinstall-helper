@@ -104,6 +104,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 │   ├── test_cli.py                            # CLI parsing, dispatch and root-privilege tests
 │   ├── test_config.py                         # autoinstall.yaml parsing tests
 │   ├── test_cidata.py                         # cidata helper tests
+│   ├── test_docker_utils.py                   # Docker preflight (`validate doctor`) tests
 │   ├── test_vm.py                             # libvirt VM command construction and XML tests
 │   ├── test_validate_autoinstall.py           # Subiquity/Curtin validation and normalization tests
 │   ├── replay/                                # Recorded-replay component tier (marker: replay; scaffolded)
@@ -127,7 +128,9 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 
 - **Python 3.10+** (with `python3-yaml` or `PyYAML` package)
 - **uv** (recommended for local development and running tests)
-- **Docker** (required for `validate` command)
+- **Docker** (required for `validate` command):
+  - Membership in the `docker` group (`sudo usermod -aG docker $USER`, then log out and back in); no `sudo` is needed to run the tool
+  - Run `autoinstall-helper validate doctor` to check the host
 - **System Utilities** (for disk operations: `flash`, `inject`, `extract`):
   - `sfdisk`, `parted`, `gdisk` / `sgdisk`
   - `mkfs.vfat` (`dosfstools`), `mtools`
@@ -263,6 +266,9 @@ Reads the installer channel from the YAML file, queries the Snap Store API for t
 > The file **must** start with the `#cloud-config` header. Without it the command fails immediately with a clear error, before contacting the Snap Store or Docker.
 
 ```bash
+# Check the host first (docker binary, daemon reachable, access without sudo)
+uv run autoinstall-helper validate doctor
+
 # Validate a specific autoinstall configuration
 uv run autoinstall-helper validate path/to/your-autoinstall.yaml
 # Or with standalone .pyz:

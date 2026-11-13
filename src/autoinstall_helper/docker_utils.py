@@ -2,7 +2,9 @@
 
 import atexit
 import functools
+import grp
 import hashlib
+import os
 import shutil
 import subprocess
 import tempfile
@@ -177,3 +179,79 @@ def docker_validate(tag: str, config_file: Path, validation: str) -> int:
     print(f"[autoinstall-helper] Validating '{config_file.name}' in container '{tag}'...")
     result = subprocess.run(cmd, check=False)
     return result.returncode
+
+
+def _docker_server_version() -> tuple[str | None, str]:
+    """Query the Docker daemon through the CLI.
+
+    Returns the server version, or (None, error) when the daemon cannot be
+    reached (not running, no permission to access the socket, ...).
+    """
+    res = subprocess.run(
+        ["docker", "version", "--format", "{{.Server.Version}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if res.returncode == 0 and res.stdout.strip():
+        return res.stdout.strip(), ""
+    lines = [line.strip() for line in (res.stderr or "").splitlines() if line.strip()]
+    return None, lines[-1] if lines else "the Docker daemon is not reachable"
+
+
+def _docker_group_membership() -> bool | None:
+    """Report whether the current process belongs to the 'docker' group.
+
+    Returns None when the group does not exist on this host.
+    """
+    try:
+        gid = grp.getgrnam("docker").gr_gid
+    except KeyError:
+        return None
+    return gid in os.getgroups()
+
+
+def docker_doctor() -> int:
+    """Report whether the host can run the validator container without sudo.
+
+    Mirrors `vm doctor`: prints a one-line-per-check report and returns 0 when
+    the host is ready, 1 otherwise.
+    """
+    print("[autoinstall-helper] Docker preflight check")
+    ready = True
+
+    docker_path = shutil.which("docker")
+    if docker_path is None:
+        print(f"[autoinstall-helper]   {'docker':<13} MISSING (required)")
+        print("[autoinstall-helper] Install Docker with: sudo apt install docker.io")
+        print("[autoinstall-helper] Docker support is NOT ready.")
+        return 1
+    print(f"[autoinstall-helper]   {'docker':<13} {docker_path}")
+
+    version, error = _docker_server_version()
+    if version is None:
+        print(f"[autoinstall-helper]   {'daemon':<13} unreachable")
+        print(f"[autoinstall-helper]   {error}")
+        print("[autoinstall-helper]   Start the daemon: sudo systemctl enable --now docker")
+        ready = False
+    else:
+        print(f"[autoinstall-helper]   {'daemon':<13} reachable (server {version})")
+
+    if os.geteuid() == 0:
+        # Root bypasses the 'docker' group, so this check cannot prove anything here.
+        print(f"[autoinstall-helper]   {'without sudo':<13} unknown (running as root)")
+        print("[autoinstall-helper]   Run this check as a normal user to verify docker group access.")
+    elif ready:
+        print(f"[autoinstall-helper]   {'without sudo':<13} ok")
+    else:
+        print(f"[autoinstall-helper]   {'without sudo':<13} no")
+        if _docker_group_membership() is False:
+            print("[autoinstall-helper]   Join the 'docker' group: sudo usermod -aG docker $USER")
+            print("[autoinstall-helper]   Then log out and back in (or run: newgrp docker)")
+
+    print(
+        "[autoinstall-helper] Docker support is ready."
+        if ready
+        else "[autoinstall-helper] Docker support is NOT ready."
+    )
+    return 0 if ready else 1

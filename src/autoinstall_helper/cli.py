@@ -4,7 +4,8 @@
 Available commands:
   - validate: reads the channel from autoinstall.yaml, resolves the version
     via `snap info`, builds the Docker image (if missing) and runs the
-    Subiquity validator inside the container.
+    Subiquity validator inside the container. `validate doctor` checks the
+    Docker host instead (binary present, daemon reachable, no sudo needed).
   - flash: writes an ISO image to the target (block device or file),
     creating the target file with fallocate if it does not exist yet.
   - inject: embeds autoinstall.yaml in the 'cidata' (FAT32) partition on the
@@ -36,6 +37,7 @@ from autoinstall_helper.config import extract_installer_channel, require_cloud_c
 from autoinstall_helper.disk import is_block_device
 from autoinstall_helper.docker_utils import (
     docker_build,
+    docker_doctor,
     docker_image_exists,
     docker_image_tag,
     docker_validate,
@@ -106,6 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_val = subparsers.add_parser(
         "validate",
         help="Validate the autoinstall.yaml file in a Docker container",
+        description=(
+            "Validate the autoinstall.yaml file in a Docker container. "
+            "Use 'validate doctor' to check whether the host can run Docker without sudo."
+        ),
     )
     p_val.add_argument(
         "config",
@@ -369,6 +375,10 @@ def _dispatch_vm(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
 def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """Dispatch the parsed command-line arguments to the appropriate handler."""
     if args.subcommand == "validate":
+        # 'validate doctor' is the Docker preflight check (the 'vm doctor' equivalent).
+        # A configuration file literally named 'doctor' can be passed as './doctor'.
+        if str(args.config) == "doctor":
+            return docker_doctor()
         return validate(args.config, validation=args.validation)
 
     if args.subcommand == "flash":

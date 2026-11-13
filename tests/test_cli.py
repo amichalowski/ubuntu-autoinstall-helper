@@ -47,6 +47,22 @@ def test_validate_dispatch_default(monkeypatch, run, tmp_path):
     assert run("validate") == 0
 
 
+def test_validate_doctor_dispatch(monkeypatch, run):
+    """'validate doctor' runs the Docker preflight instead of the validator."""
+    calls = {}
+    monkeypatch.setattr(cli, "docker_doctor", lambda: calls.update(doctor=True) or 0)
+    monkeypatch.setattr(cli, "validate", lambda cfg, validation: pytest.fail("validate must not run"))
+
+    assert run("validate", "doctor") == 0
+    assert calls == {"doctor": True}
+
+
+def test_validate_doctor_propagates_failure(monkeypatch, run):
+    monkeypatch.setattr(cli, "docker_doctor", lambda: 1)
+
+    assert run("validate", "doctor") == 1
+
+
 # ---------------------------------------------------------------------------
 # flash
 # ---------------------------------------------------------------------------
