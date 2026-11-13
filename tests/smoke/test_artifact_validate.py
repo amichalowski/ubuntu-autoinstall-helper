@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WRONG_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-wrong-storage.yaml"
 BROKEN_COMMANDS_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-broken-commands.yaml"
 BROKEN_SNAPS_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-broken-snaps.yaml"
+BROKEN_APT_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-broken-apt.yaml"
 VALIDATOR_REPO = "ubuntu-desktop-bootstrap"
 
 # Commands that do not build or run a container finish quickly.
@@ -181,6 +182,62 @@ def test_snaps_scope_accepts_a_valid_snap(run_artifact, tmp_path):
     output = _output(proc)
     assert proc.returncode == 0, output
     assert "[snaps] Snap declarations are valid." in output, output
+
+
+def test_apt_scope_rejects_broken_repositories(run_artifact):
+    """--validation apt must reject a PPA that does not exist on Launchpad."""
+    proc = run_artifact("validate", str(BROKEN_APT_CONFIG), "--validation", "apt")
+
+    output = _output(proc)
+    assert proc.returncode != 0, output
+    assert "[apt] Writing 2 source(s) for resolute" in output, output
+    assert "PPA 'ppa:autoinstall-helper/no-such-ppa' does not exist on Launchpad" in output, output
+    assert "[apt] APT validation failed." in output, output
+
+
+def test_apt_scope_rejects_a_missing_package(run_artifact, tmp_path):
+    """--validation apt must name packages that no repository provides."""
+    config = tmp_path / "missing-package.yaml"
+    config.write_text(
+        "#cloud-config\n"
+        "autoinstall:\n"
+        "  version: 1\n"
+        "  refresh-installer:\n"
+        "    update: true\n"
+        '    channel: "26.04/stable"\n'
+        "  packages:\n"
+        "    - autoinstall-helper-nonexistent-package\n",
+        encoding="utf-8",
+    )
+
+    proc = run_artifact("validate", str(config), "--validation", "apt")
+
+    output = _output(proc)
+    assert proc.returncode != 0, output
+    assert "not available in the configured repositories" in output, output
+    assert "autoinstall-helper-nonexistent-package" in output, output
+
+
+def test_apt_scope_accepts_a_valid_package(run_artifact, tmp_path):
+    """A package that exists in the default repositories must pass."""
+    config = tmp_path / "valid-package.yaml"
+    config.write_text(
+        "#cloud-config\n"
+        "autoinstall:\n"
+        "  version: 1\n"
+        "  refresh-installer:\n"
+        "    update: true\n"
+        '    channel: "26.04/stable"\n'
+        "  packages:\n"
+        "    - git\n",
+        encoding="utf-8",
+    )
+
+    proc = run_artifact("validate", str(config), "--validation", "apt")
+
+    output = _output(proc)
+    assert proc.returncode == 0, output
+    assert "[apt] APT repositories and packages are valid." in output, output
 
 
 def test_validate_reuses_cached_docker_image(run_artifact):

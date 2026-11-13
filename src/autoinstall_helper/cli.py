@@ -6,12 +6,12 @@ Available commands:
     latest Ubuntu LTS channel when `refresh-installer.channel` is absent),
     resolves the version via the Snap Store, builds the Docker image (if
     missing) and runs the
-    Subiquity/Curtin validator plus the shell-syntax check of the
-    early/late/error commands inside the container. The `snaps:` section is
-    checked against the Snap Store on the host (no Docker needed for
-    `--validation snaps`). `validate doctor` checks the
-    Docker host instead (binary present, daemon reachable, no sudo needed) and
-    `validate images` lists or prunes the locally built validator images.
+    Subiquity/Curtin validator, the shell-syntax check of the
+    early/late/error commands and the APT repository/package check inside the
+    container. The `snaps:` section is checked against the Snap Store on the
+    host (no Docker needed for `--validation snaps`). `validate doctor` checks
+    the Docker host instead (binary present, daemon reachable, no sudo needed)
+    and `validate images` lists or prunes the locally built validator images.
   - flash: writes an ISO image to the target (block device or file),
     creating the target file with fallocate if it does not exist yet.
   - inject: embeds autoinstall.yaml in the 'cidata' (FAT32) partition on the
@@ -57,6 +57,7 @@ from autoinstall_helper.snapstore import (
     SnapStoreError,
     get_base_image,
     get_snap_version,
+    installer_release,
     latest_lts_channel,
     supports_embedded_validator,
     validate_snaps,
@@ -145,6 +146,7 @@ def validate(
         validation,
         shellcheck=shellcheck,
         shellcheck_severity=shellcheck_severity,
+        release=installer_release(channel, version),
     )
     if rc == 0 and not snaps_clean:
         print("[autoinstall-helper] Validation failed: the snaps layer reported errors.", file=sys.stderr)
@@ -200,12 +202,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_val.add_argument(
         "--validation",
-        choices=("autoinstall", "storage", "commands", "snaps", "full"),
+        choices=("autoinstall", "storage", "commands", "snaps", "apt", "full"),
         default="full",
         help=(
             "Validation scope: autoinstall (Subiquity), storage (storage actions + "
             "Curtin schema), commands (shell syntax of early/late/error commands), "
             "snaps (host-side Snap Store existence, channel and classic confinement), "
+            "apt (in-container repository, signing key and package checks), "
             "full (all checks; default)"
         ),
     )

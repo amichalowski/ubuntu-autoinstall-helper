@@ -175,6 +175,7 @@ def docker_validate(
     *,
     shellcheck: bool = True,
     shellcheck_severity: str = "error",
+    release: str | None = None,
 ) -> int:
     """Run validation inside the Docker container and return the exit code."""
     container_path = "/data/autoinstall.yaml"
@@ -195,6 +196,8 @@ def docker_validate(
     ]
     if not shellcheck:
         cmd.append("--no-shellcheck")
+    if release:
+        cmd.extend(["--release", release])
     print(f"[autoinstall-helper] Validating '{config_file.name}' in container '{tag}'...")
     result = subprocess.run(cmd, check=False)
     return result.returncode

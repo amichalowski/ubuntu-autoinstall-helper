@@ -8,9 +8,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
+    gnupg \
+    lsb-release \
     python3 \
     python3-aiohttp \
     python3-apport \
+    python3-apt \
     python3-attr \
     python3-bson \
     python3-debian \
@@ -27,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-urwid \
     python3-yaml \
     shellcheck \
+    software-properties-common \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 

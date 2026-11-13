@@ -52,6 +52,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
   - [Layer 4: Subiquity → Curtin Normalization](#4-subiquity--curtin-normalization-curtin_storage_input)
   - [Layer 5: Curtin Schema Validation](#5-curtin-schema-validation-curtin-schema-validate-subprocess)
   - [Layer 6: Shell Command Syntax Validation](#6-shell-command-syntax-validation-validate_shell_commands)
+  - [Layer 7: APT Repository and Package Validation](#7-apt-repository-and-package-validation-validate_apt)
   - [Host-Side Snap Store Validation](#host-side-snap-store-validation-snapstorevalidate_snaps)
   - [What the Validator Intentionally Avoids Checking Manually](#what-the-validator-intentionally-avoids-checking-manually)
 - [Erroneous Configuration Test Case (`wrong-autoinstall`)](#erroneous-configuration-test-case-wrong-autoinstall)
@@ -100,7 +101,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 │           ├── __init__.py
 │           ├── Dockerfile                     # Container definition with matching Subiquity/Curtin version
 │           ├── timedatectl.sh                 # timedatectl mock for Subiquity dry-run
-│           └── validate-autoinstall.py        # In-container 6-layer validation script
+│           └── validate-autoinstall.py        # In-container 7-layer validation script
 ├── tests/                                     # Comprehensive unit test suite (pytest)
 │   ├── test_build.py                          # zipapp packaging, docker digest and asset extraction tests
 │   ├── test_cli.py                            # CLI parsing, dispatch and root-privilege tests
@@ -134,6 +135,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 - **Docker** (required for every `validate` scope except `--validation snaps`):
   - Membership in the `docker` group (`sudo usermod -aG docker $USER`, then log out and back in); no `sudo` is needed to run the tool
   - Run `autoinstall-helper validate doctor` to check the host
+  - The `apt` layer (part of `--validation full`) additionally needs network access inside the container, so it can reach the Ubuntu archive, Launchpad and the keyserver
 - **Installer channel `26.04` or newer** for container validation (older releases lack Subiquity's built-in validator API)
 - **System Utilities** (for disk operations: `flash`, `inject`, `extract`):
   - `sfdisk`, `parted`, `gdisk` / `sgdisk`
@@ -291,11 +293,12 @@ uv run autoinstall-helper validate path/to/your-autoinstall.yaml
 uv run autoinstall-helper validate wrong-autoinstall/autoinstall-wrong-storage.yaml
 
 # Choose validation scope:
-#   --validation full        (default: Subiquity dry-run + Curtin schema + shell commands + snaps)
+#   --validation full        (default: Subiquity dry-run + Curtin schema + shell commands + snaps + apt)
 #   --validation autoinstall (Subiquity only)
 #   --validation storage     (storage only: structure pre-validation + Curtin schema)
 #   --validation commands    (shell syntax of early/late/error commands only)
 #   --validation snaps       (Snap Store existence, channel and classic confinement only)
+#   --validation apt         (repositories, signing keys, PPAs and packages only)
 uv run autoinstall-helper validate wrong-autoinstall/autoinstall-wrong-storage.yaml --validation storage
 
 # Snap checks (host-side, no Docker): every `snaps:` entry must exist in the Snap
@@ -306,6 +309,12 @@ uv run autoinstall-helper validate autoinstall.yaml --validation snaps
 uv run autoinstall-helper validate autoinstall.yaml --validation commands
 uv run autoinstall-helper validate autoinstall.yaml --no-shellcheck              # syntax check only
 uv run autoinstall-helper validate autoinstall.yaml --shellcheck-severity warning
+
+# APT checks (in the container): every `apt.sources` entry is written for the
+# release being installed, `apt-get update` verifies the repositories and their
+# signatures (so a wrong key or a missing PPA fails), and every `packages:` entry
+# is checked for availability.
+uv run autoinstall-helper validate autoinstall.yaml --validation apt
 
 # List the validator images built so far (tag, size, age, digest status)
 uv run autoinstall-helper validate images
@@ -444,17 +453,19 @@ Inspect the marker directly with `virsh desc NAME`.
 
 ## Architecture and Validation Layers
 
-The autoinstall configuration verification process inside the container (`docker/validate-autoinstall.py`) relies on 6 specialized layers, ensuring full compatibility without duplicating upstream logic:
+The autoinstall configuration verification process inside the container (`docker/validate-autoinstall.py`) relies on 7 specialized layers, ensuring full compatibility without duplicating upstream logic:
 
 ```mermaid
 flowchart TD
     A["autoinstall YAML file"] --> B["1. Parsing & Cloud-Config Wrapper"]
     B --> C["2. Storage Structure Pre-validation (validate_storage_structure)"]
     B --> H["6. Shell Command Syntax (validate_shell_commands)"]
+    B --> I["7. APT Repository and Package Validation (validate_apt)"]
     C --> D["3. Subiquity Dry-Run (verify_autoinstall)"]
     D --> E["4. Subiquity → Curtin Normalization (curtin_storage_input)"]
     E --> F["5. Curtin Schema Validation (curtin schema-validate subprocess)"]
     H --> G["Success / Error Report"]
+    I --> G
     F --> G
 ```
 
@@ -484,6 +495,16 @@ flowchart TD
 ### 6. Shell Command Syntax Validation (`validate_shell_commands`)
 - **What it does:** Parses the shell syntax of every `early-commands`, `late-commands` and `error-commands` entry. Subiquity runs a string entry as `sh -c <command>` and a list entry directly as argv (`subiquity/server/controllers/cmdlist.py`), so string entries are checked with `sh -n` and list entries only for element types. Because the outer parse of `bash -c '...'` only sees a quoted word, the embedded payload is extracted and checked recursively with its own interpreter. shellcheck (severity `error` by default) runs as a complementary pass, catching classes `-n` misses — for example an unterminated here-document, which `sh -n` reports only as a warning.
 - **Why:** A syntax error in a late command surfaces at the very end of an installation, after the disk has already been partitioned and the system installed. Catching it before flashing saves a full reinstall cycle. The check is purely syntactic: commands are never executed and their runtime context (`curtin in-target`, installed binaries, `/target`) is not simulated.
+
+### 7. APT Repository and Package Validation (`validate_apt`)
+
+- **What it does:** Writes every `autoinstall.apt.sources` entry into the container's apt configuration for the release being installed, then runs `apt-get update` and `apt-get install --simulate` for every `packages:` entry. It checks that:
+  - each repository resolves and its `Release`/`InRelease` signature matches the declared signing key, so a wrong or missing key fails,
+  - a `ppa:owner/name` shorthand exists on Launchpad (queried directly, which yields a precise "does not exist" message) and its signing key can be fetched from the keyserver,
+  - every declared package is available in the resulting indexes.
+- **Why:** A typo in a repository URL, a PPA without a pocket for the target release, a wrong signing key or a misspelled package only surfaces during the install, after partitioning and the base system install. `apt-get update` performs the real signature verification, so the check reflects exactly what the installer will do.
+- **Release handling:** the validator image is built on the Subiquity snap base, which is older than the release being installed (the `26.04` installer runs on a `24.04` base). The target release is therefore resolved on the host (`snapstore.installer_release`), passed to the container (`--release`), mapped to a codename with `distro-info`, and used both to expand `$RELEASE` and to retarget the container's own archive sources, so packages are checked against the target release's archive.
+- **Scope:** `mirror-selection` and `geoip` are resolved by Subiquity itself and have no apt equivalent, so they are reported and skipped. Custom `primary`/`security` mirrors are not applied.
 
 ### Host-Side Snap Store Validation (`snapstore.validate_snaps`)
 - **What it does:** Runs on the host (`cli.validate`, no Docker) for `--validation snaps` and as part of `--validation full`. It extracts `autoinstall.snaps` from the YAML (`config.extract_snaps`) and queries the Snap Store for every entry, verifying that:
@@ -518,3 +539,5 @@ The file located at [`wrong-autoinstall/autoinstall-wrong-storage.yaml`](wrong-a
 A second negative fixture, [`wrong-autoinstall/autoinstall-broken-commands.yaml`](wrong-autoinstall/autoinstall-broken-commands.yaml), isolates the command layer: its storage configuration is valid, but its commands contain a missing `done`, an unterminated here-document, a broken payload inside `bash -c '...'` and a non-string element in an argv-style entry. It proves that `--validation commands` catches what the Subiquity and Curtin layers never look at.
 
 A third negative fixture, [`wrong-autoinstall/autoinstall-broken-snaps.yaml`](wrong-autoinstall/autoinstall-broken-snaps.yaml), isolates the snap layer: it declares a snap that does not exist, a channel that is not published and a strict snap that requests `classic: true`. It proves that `--validation snaps` catches mistakes that only surface when the installer reaches the snap phase.
+
+A fourth negative fixture, [`wrong-autoinstall/autoinstall-broken-apt.yaml`](wrong-autoinstall/autoinstall-broken-apt.yaml), isolates the apt layer: it points at a PPA that does not exist on Launchpad, at a repository signed with the wrong key and at a package that no repository provides. It proves that `--validation apt` catches mistakes that only surface when the installer configures apt and installs the declared packages.

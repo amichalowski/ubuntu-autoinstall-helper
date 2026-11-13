@@ -279,6 +279,24 @@ def latest_lts_channel(snap_name: str = SNAP_NAME) -> str:
     return f"{latest}/stable"
 
 
+# Ubuntu releases are named '<year>.<month>', where the month is April or October.
+_RELEASE_PATTERN = re.compile(r"^(\d{2}\.(?:04|10))")
+
+
+def installer_release(channel: str, version: str) -> str | None:
+    """Return the Ubuntu release (e.g. '26.04') the installer targets.
+
+    A pinned channel names the release in its track; otherwise the installer
+    version (e.g. '26.04.1') carries it as a prefix.  Returns None when neither
+    source exposes a release number, so the caller can degrade with a message.
+    """
+    match = _RELEASE_PATTERN.match(channel.split("/", 1)[0])
+    if match:
+        return match.group(1)
+    match = _RELEASE_PATTERN.match(version)
+    return match.group(1) if match else None
+
+
 def supports_embedded_validator(version: str) -> bool:
     """Return whether the installer version ships Subiquity's built-in validator API.
 

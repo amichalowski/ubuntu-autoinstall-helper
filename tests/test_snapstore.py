@@ -208,6 +208,33 @@ class TestSupportsEmbeddedValidator:
         assert snapstore.supports_embedded_validator(version) is False
 
 
+class TestInstallerRelease:
+    """Tests for installer_release(channel, version)."""
+
+    @pytest.mark.parametrize(
+        ("channel", "version", "expected"),
+        [
+            ("26.04/stable", "26.04.1", "26.04"),
+            ("24.04/edge", "24.04.4.1", "24.04"),
+            ("latest/stable", "26.04.1", "26.04"),
+            ("latest/stable", "24.10", "24.10"),
+        ],
+    )
+    def test_release_is_resolved(self, channel, version, expected):
+        assert snapstore.installer_release(channel, version) == expected
+
+    @pytest.mark.parametrize(
+        ("channel", "version"),
+        [
+            ("latest/stable", "garbage"),
+            ("latest/stable", "1.2.3"),
+            ("custom/stable", ""),
+        ],
+    )
+    def test_unresolvable_release_returns_none(self, channel, version):
+        assert snapstore.installer_release(channel, version) is None
+
+
 class TestGetBaseImage:
     """Tests for get_base_image(version)."""
 

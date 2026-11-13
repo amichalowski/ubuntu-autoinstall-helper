@@ -1,0 +1,49 @@
+#cloud-config
+# Negative test case for the APT validation layer.
+# The storage configuration is intentionally valid, so this file fails ONLY on
+# the apt checks. Do not use it as a reference configuration.
+#
+# curtin aborts on the first source it cannot configure, so only the first
+# entry below is exercised per run; the others document the failure modes the
+# layer catches (see the apt smoke tests for isolated cases).
+autoinstall:
+  version: 1
+
+  refresh-installer:
+    update: true
+    channel: "26.04/stable"
+
+  storage:
+    layout:
+      name: direct
+
+  apt:
+    sources:
+      # No PPA with this owner/name exists on Launchpad.
+      nonexistent-ppa:
+        source: "ppa:autoinstall-helper/no-such-ppa"
+
+      # The Docker repository is signed by the Docker release key, not by the
+      # throwaway key below, so `apt-get update` rejects the Release signature.
+      wrong-key:
+        source: |
+          Types: deb
+          URIs: https://download.docker.com/linux/ubuntu
+          Suites: $RELEASE
+          Components: stable
+          Signed-By: /etc/apt/trusted.gpg.d/wrong-key.asc
+        key: |
+          -----BEGIN PGP PUBLIC KEY BLOCK-----
+
+          mDMEavdbFxYJKwYBBAHaRw8BAQdAVWKDxeC2I/BOmmUQ7mDEgkfvLlk2quxvkXew
+          xddvabe0MmF1dG9pbnN0YWxsLWhlbHBlciB0ZXN0IGtleSA8dGVzdEBleGFtcGxl
+          LmludmFsaWQ+iJMEExYKADsWIQSaBffkhbwLT51pxw6RVQB9zXpa9QUCavdbFwIb
+          AwULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRCRVQB9zXpa9YP3AP4hjmOL
+          y06bW2az9JGMkb4dUD99yWQ0GCYH01E3gVlQzwEAz4kSlzkoXBYI7uoPPJOENBmU
+          wvfn8NrAyrw0o89a/AA=
+          =aNkI
+          -----END PGP PUBLIC KEY BLOCK-----
+
+  packages:
+    # No package with this name exists in any Ubuntu repository.
+    - autoinstall-helper-nonexistent-package

@@ -171,6 +171,23 @@ class TestDockerValidate:
             "error",
         ]
 
+    def test_release_is_forwarded(self, monkeypatch, tmp_path):
+        stub = install_stub(monkeypatch, DockerStub())
+        config = tmp_path / "autoinstall.yaml"
+
+        assert docker_utils.docker_validate("validator:1", config, "apt", release="26.04") == 0
+
+        cmd = stub.calls[0]
+        assert cmd[cmd.index("--release") + 1] == "26.04"
+
+    def test_release_is_omitted_when_unknown(self, monkeypatch, tmp_path):
+        stub = install_stub(monkeypatch, DockerStub())
+        config = tmp_path / "autoinstall.yaml"
+
+        docker_utils.docker_validate("validator:1", config, "apt")
+
+        assert "--release" not in stub.calls[0]
+
     def test_shellcheck_options_are_forwarded(self, monkeypatch, tmp_path):
         stub = install_stub(monkeypatch, DockerStub(rm_rc=1))
         config = tmp_path / "autoinstall.yaml"
