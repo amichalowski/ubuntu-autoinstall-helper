@@ -13,6 +13,7 @@ Repository guidelines for AI agents working on **autoinstall-helper**.
 ## Toolchain & Environment
 
 - **Package & environment manager:** Always use [`uv`](https://docs.astral.sh/uv/) (`uv run ...`). Do not use raw `pip` or manage system virtualenvs directly.
+- **Workshop isolation:** the `dev` workshop bind-mounts the repository, so host and workshop would otherwise share `.venv` and recreate each other's environment. The in-project SDK `.workshop/uv-env/` exports `UV_PROJECT_ENVIRONMENT=<project>/.venv-workshop` inside the workshop (`.workshop/dev.yaml` → `project-uv-env`). Run `uv run ...` normally on both sides; never copy, delete, or reuse the other side's environment (`.venv` is the host's, `.venv-workshop` is the workshop's).
 - **Python target:** `>= 3.10`.
 - **Zero runtime dependencies rule:** Production code in `src/autoinstall_helper/` must only rely on the Python Standard Library (and Ubuntu built-ins like `python3-yaml`). **Never** add packages to `[project.dependencies]`. Only dev/test dependencies are allowed in `[dependency-groups]`.
 

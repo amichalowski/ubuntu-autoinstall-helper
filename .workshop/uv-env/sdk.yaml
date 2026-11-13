@@ -1,0 +1,13 @@
+name: uv-env
+version: "0.1"
+summary: Workshop-local uv project environment
+description: |
+  Keeps the uv project environment inside the workshop instead of the shared
+  project tree. The workshop bind-mounts the project directory, so the host
+  and the workshop would otherwise fight over the same .venv: every uv run
+  on one side recreates the environment built for the interpreter on the
+  other side.
+
+  The setup-project hook exports UV_PROJECT_ENVIRONMENT pointing at
+  .venv-workshop in the project directory, so the workshop uses its own
+  interpreter and never touches the host's .venv.

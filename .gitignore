@@ -2,6 +2,7 @@
 __pycache__
 .workshop.lock
 .venv/
+.venv-workshop/
 dist/
 *.pyz
 *.egg-info/

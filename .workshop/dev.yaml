@@ -16,6 +16,11 @@ sdks:
         read-only: true
       ssh-agent:
         interface: ssh-agent
+  # In-project SDK defined in .workshop/uv-env/. Its setup-project hook exports
+  # UV_PROJECT_ENVIRONMENT, so the workshop builds its own uv environment
+  # (.venv-workshop) instead of recreating the host's shared project .venv.
+  # Kept last so the base-image snapshots of the SDKs above stay valid.
+  - name: project-uv-env
 
 actions:
   opencode: opencode "$@"

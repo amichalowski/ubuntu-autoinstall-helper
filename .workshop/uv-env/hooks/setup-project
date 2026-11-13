@@ -1,0 +1,28 @@
+#!/bin/bash
+# Run as the workshop user, with the project directory as the working directory.
+#
+# The workshop bind-mounts the project directory, so `uv run` on the host and
+# `uv run` inside the workshop target the same .venv while requiring different
+# interpreters: each side recreates the environment built by the other one.
+# Point the workshop at a private project environment instead.
+#
+# UV_PROJECT_ENVIRONMENT is read from the login shell environment, so the
+# export is appended to ~/.profile (which the workshop's login shells source).
+# The guard keeps the file stable when the hook runs more than once.
+
+set -euo pipefail
+
+profile="${HOME}/.profile"
+environment="${PWD}/.venv-workshop"
+
+touch "$profile"
+if grep -qF "UV_PROJECT_ENVIRONMENT" "$profile"; then
+    exit 0
+fi
+
+cat <<EOF >>"$profile"
+
+# Added by the 'uv-env' in-project SDK (autoinstall-helper):
+# keep the workshop's uv environment out of the shared project tree.
+export UV_PROJECT_ENVIRONMENT="${environment}"
+EOF
