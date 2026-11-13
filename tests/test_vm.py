@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from autoinstall_helper import vm
+from autoinstall_helper.fsprobe import PathInfo
 
 
 def completed(stdout="", stderr="", returncode=0):
@@ -371,7 +372,7 @@ class TestCreate:
     def test_block_device_is_rejected(self, tmp_path, monkeypatch):
         media = tmp_path / "pendrive.img"
         media.touch()
-        monkeypatch.setattr(vm, "is_block_device", lambda path: True)
+        monkeypatch.setattr(vm.fsprobe, "probe", lambda path: PathInfo(True, False, False, True, 0))
         with pytest.raises(SystemExit, match="block devices are not supported"):
             vm.create(vm.VmSpec(name="test-vm", media=media), dry_run=True)
 

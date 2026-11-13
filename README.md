@@ -89,6 +89,10 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 │       ├── cidata.py                          # cidata (FAT32) partition injection & extraction
 │       ├── disk.py                            # Block device and GPT backup header helpers
 │       ├── vm.py                              # libvirt/QEMU VMs booting installation media
+│       ├── fsprobe.py                         # Filesystem metadata seam (existence/type/size, never contents)
+│       ├── interactions.py                    # Shared fake response + URL/header extraction helpers
+│       ├── recorder.py                        # Dev mode: record subprocess/network/filesystem interactions
+│       ├── replayer.py                        # Replay recorded interactions for hermetic tests
 │       ├── build.py                           # Standalone zipapp (.pyz) builder
 │       └── docker/
 │           ├── __init__.py
@@ -102,6 +106,10 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 │   ├── test_cidata.py                         # cidata helper tests
 │   ├── test_vm.py                             # libvirt VM command construction and XML tests
 │   ├── test_validate_autoinstall.py           # Subiquity/Curtin validation and normalization tests
+│   ├── replay/                                # Recorded-replay component tier (marker: replay; scaffolded)
+│   │   ├── README.md                          # Scenario plan + recording recipe (--record)
+│   │   ├── conftest.py                        # replayed_session fixture (patches subprocess/urllib/fsprobe)
+│   │   └── fixtures/                          # Committed *.recording.json sessions (none yet)
 │   └── smoke/
 │       ├── conftest.py                        # Shared artifact/run fixtures for the smoke tests
 │       ├── test_artifact_cli.py               # Packaged CLI contract: parsing, exit codes, no asset extraction
@@ -146,10 +154,28 @@ uv run autoinstall-helper validate autoinstall.yaml
 # Run unit tests
 uv run pytest -v
 
+# Run the hermetic recorded-replay component tests (no Docker/network/devices)
+# (tier is scaffolded — see tests/replay/README.md for the recording plan)
+uv run pytest -m replay -v
+
 # Lint & format check (ruff version pinned in uv.lock — same as CI)
 uv run ruff check .
 uv run ruff format --check .
 ```
+
+### Dev mode: recording interactions (`--record`)
+
+The `--record` flag captures every `subprocess`, `urllib`, and filesystem-metadata interaction of a session into a single, committable JSON file. It is a **dev-only** feature (the flag must precede the subcommand):
+
+```bash
+# Record a real session (run on a host with the required tools/devices)
+uv run autoinstall-helper --record tests/replay/fixtures/flash-new-target.recording.json flash respin.iso target.img --yes
+
+# Replay it deterministically, with no ISO, device, Docker, or network
+uv run pytest -m replay -v
+```
+
+Only metadata is captured for paths (existence, type, size) and only exit codes plus console output for processes — disk images, ISOs, and block devices are never written into fixtures. See [`docs/design/dev-mode-recording.md`](docs/design/dev-mode-recording.md) for the format and architecture, and [`tests/replay/README.md`](tests/replay/README.md) for the scenario plan of recordings to make.
 
 ### Local pre-commit hook
 

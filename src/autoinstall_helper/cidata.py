@@ -10,7 +10,8 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-from autoinstall_helper.disk import fix_gpt_backup_header, is_block_device
+from autoinstall_helper import fsprobe
+from autoinstall_helper.disk import fix_gpt_backup_header
 
 CIDATA_LABEL = "cidata"
 MIN_CIDATA_FREE_SPACE_MB = 10.0
@@ -55,7 +56,8 @@ def _loop_context(image: Path) -> Iterator[str]:
 @contextlib.contextmanager
 def _target_disk_context(target: Path) -> Iterator[str]:
     """Yield the disk or attached loop device path for the target."""
-    if target.is_file() and not is_block_device(target):
+    info = fsprobe.probe(target)
+    if info.is_file and not info.is_block:
         with _loop_context(target) as loop_dev:
             yield loop_dev
     else:
@@ -290,11 +292,12 @@ def inject(target: Path, yaml_path: Path) -> int:
 
     It handles both image files (via losetup) and block devices.
     """
-    if not yaml_path.exists():
+    yaml_info = fsprobe.probe(yaml_path)
+    if not yaml_info.exists:
         raise SystemExit(f"ERROR: YAML file does not exist: {yaml_path}")
-    if not yaml_path.is_file():
+    if not yaml_info.is_file:
         raise SystemExit(f"ERROR: The given path is not a file: {yaml_path}")
-    if not target.exists():
+    if not fsprobe.probe(target).exists:
         raise SystemExit(f"ERROR: Target does not exist: {target}")
 
     with _target_disk_context(target) as disk:
@@ -327,15 +330,17 @@ def extract(target: Path, yaml_path: Path) -> int:
 
     It handles both image files (via losetup) and block devices.
     """
-    if not target.exists():
+    if not fsprobe.probe(target).exists:
         raise SystemExit(f"ERROR: Target does not exist: {target}")
-    if yaml_path.exists() and yaml_path.is_dir():
+    yaml_info = fsprobe.probe(yaml_path)
+    if yaml_info.exists and yaml_info.is_dir:
         raise SystemExit(f"ERROR: The given output path is a directory: {yaml_path}")
 
     with _target_disk_context(target) as disk:
         part = _find_cidata_partition(disk)
         if not part:
-            target_desc = "image" if target.is_file() and not is_block_device(target) else "device"
+            target_info = fsprobe.probe(target)
+            target_desc = "image" if target_info.is_file and not target_info.is_block else "device"
             raise SystemExit(f"ERROR: 'cidata' partition not found on {target_desc} {target}.")
         with _mount_context(part) as mnt:
             _read_cidata(mnt, yaml_path)

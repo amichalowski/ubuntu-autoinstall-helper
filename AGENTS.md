@@ -27,8 +27,10 @@ Repository guidelines for AI agents working on **autoinstall-helper**.
 ## Testing Conventions
 
 - Run tests via `uv run pytest`.
+- The suite has three tiers: unit (`tests/test_*.py`, the default run), recorded replay (`tests/replay/`, marker `replay`), and smoke (`tests/smoke/`, marker `smoke`). Both replay and smoke are excluded from the default `uv run pytest` run.
+- Replay tests are hermetic component tests: they drive a real command flow (`flash`, `cidata`, `validate`, …) but serve every external boundary (`subprocess`, `urllib`, filesystem metadata) from a committed `tests/replay/fixtures/*.recording.json`. Run them with `uv run pytest -m replay` (no Docker, network, or devices required). Recordings are produced with the dev-mode `--record` flag (`autoinstall-helper --record session.json <command>`); see `docs/design/dev-mode-recording.md`. The tier is currently **scaffolded** (machinery + fixture, no committed recordings yet) — add a test together with each real recording following the scenario plan in `tests/replay/README.md`, and re-add the CI `pytest -m replay` step once the first fixture lands.
 - Smoke tests live in `tests/smoke/` and carry the `smoke` marker. They execute the built `.pyz` artifact end-to-end and require Docker and network access, so they are excluded from the default `uv run pytest` run—execute them explicitly with `uv run pytest -m smoke` (after building the artifact, see README).
-- Mock at the point of **usage** (e.g., `autoinstall_helper.flash.subprocess.run`), not definition.
+- Mock at the point of **usage** (e.g., `autoinstall_helper.flash.subprocess.run`), not definition. Filesystem metadata is resolved through the `fsprobe.probe()` seam; mock it at the point of usage (`autoinstall_helper.disk.fsprobe.probe`) rather than patching `pathlib` globally.
 - Use pytest's built-in `tmp_path` fixture for any file/directory I/O tests.
 - Never perform real block device operations, network calls, or Docker invocations during unit tests—mock system boundaries (`subprocess.run`, `urllib.request.urlopen`, `losetup`, `parted`).
 

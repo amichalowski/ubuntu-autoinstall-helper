@@ -1,34 +1,25 @@
 """Unit tests for autoinstall_helper.disk helpers."""
 
-import stat
 from pathlib import Path
 from types import SimpleNamespace
 
 from autoinstall_helper import disk
+from autoinstall_helper.fsprobe import PathInfo
 
 
 class TestIsBlockDevice:
     """Tests for is_block_device(path)."""
 
     def test_block_device(self, monkeypatch):
-        def _fake_stat(self):
-            return SimpleNamespace(st_mode=stat.S_IFBLK | 0o660)
-
-        monkeypatch.setattr(Path, "stat", _fake_stat)
+        monkeypatch.setattr(disk.fsprobe, "probe", lambda path: PathInfo(True, False, False, True, 0))
         assert disk.is_block_device(Path("/dev/sda")) is True
 
     def test_regular_file(self, monkeypatch):
-        def _fake_stat(self):
-            return SimpleNamespace(st_mode=stat.S_IFREG | 0o644)
-
-        monkeypatch.setattr(Path, "stat", _fake_stat)
+        monkeypatch.setattr(disk.fsprobe, "probe", lambda path: PathInfo(True, True, False, False, 4096))
         assert disk.is_block_device(Path("/tmp/image.img")) is False
 
     def test_nonexistent_path(self, monkeypatch):
-        def _fake_stat(self):
-            raise OSError("No such file or directory")
-
-        monkeypatch.setattr(Path, "stat", _fake_stat)
+        monkeypatch.setattr(disk.fsprobe, "probe", lambda path: PathInfo(False, False, False, False, 0))
         assert disk.is_block_device(Path("/dev/does-not-exist")) is False
 
 

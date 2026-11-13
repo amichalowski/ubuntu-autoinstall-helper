@@ -24,13 +24,17 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-# Smoke tests (tests/smoke/) execute the built .pyz artifact end-to-end and
-# require Docker and network access; they are excluded from the default run.
-# Execute them explicitly with: uv run pytest -m smoke
+# Test tiers:
+# - unit (tests/test_*.py): default run, boundaries mocked at point of use
+# - replay (tests/replay/): component tests that replay committed recordings
+# - smoke (tests/smoke/): end-to-end tests against the built .pyz artifact
+# Both replay and smoke are excluded from the default run; execute them with
+# `uv run pytest -m replay` and `uv run pytest -m smoke` respectively.
 markers = [
     "smoke: end-to-end tests against the built .pyz artifact (require Docker and network)",
+    "replay: component tests that replay tests/replay/fixtures/*.recording.json",
 ]
-addopts = "-m 'not smoke'"
+addopts = "-m 'not smoke and not replay'"
 
 [tool.ruff]
 line-length = 120

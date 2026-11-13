@@ -30,7 +30,7 @@ import os
 import sys
 from pathlib import Path
 
-from autoinstall_helper import vm
+from autoinstall_helper import fsprobe, vm
 from autoinstall_helper.cidata import extract, inject
 from autoinstall_helper.config import extract_installer_channel, require_cloud_config_header
 from autoinstall_helper.disk import is_block_device
@@ -58,7 +58,7 @@ def _require_root(action: str) -> None:
 
 def validate(config_file: Path, validation: str = "full") -> int:
     """Validate autoinstall.yaml against Subiquity and Curtin in a Docker container."""
-    if not config_file.exists():
+    if not fsprobe.probe(config_file).exists:
         raise SystemExit(f"ERROR: File does not exist: {config_file}")
 
     print(f"[autoinstall-helper] Reading: {config_file}")
@@ -74,7 +74,7 @@ def validate(config_file: Path, validation: str = "full") -> int:
         print(f"[autoinstall-helper] Image '{tag}' already exists.")
     else:
         dockerfile = get_docker_dir() / "Dockerfile"
-        if not dockerfile.exists():
+        if not fsprobe.probe(dockerfile).exists:
             raise SystemExit(f"ERROR: Dockerfile not found in {dockerfile.parent}")
         base_image = get_base_image(version)
         print(f"[autoinstall-helper] Base image: {base_image}")
@@ -93,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="autoinstall-helper",
         description="Tool for managing autoinstall configuration and Ubuntu installation media.",
+    )
+    parser.add_argument(
+        "--record",
+        metavar="FILE",
+        default=None,
+        help="Dev mode: record all subprocess/network interactions to FILE (pass before COMMAND)",
     )
     subparsers = parser.add_subparsers(dest="subcommand", metavar="COMMAND")
 
@@ -402,6 +408,13 @@ def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.record:
+        from autoinstall_helper.recorder import recording_session
+
+        with recording_session(args.record) as rec:
+            rc = dispatch(args, parser)
+            rec.exit_code = rc
+        return rc
     return dispatch(args, parser)
 
 

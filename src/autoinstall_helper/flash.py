@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from autoinstall_helper import fsprobe
 from autoinstall_helper.disk import fix_gpt_backup_header, is_block_device
 
 # Extra space added when creating the target file (for the partition holding autoinstall.yaml)
@@ -32,8 +33,9 @@ def _apply_nocow(target: Path) -> None:
     """
     if not _is_btrfs(target.parent):
         return
-    if target.exists():
-        if target.stat().st_size != 0:
+    info = fsprobe.probe(target)
+    if info.exists:
+        if info.size != 0:
             return
     else:
         target.touch()
@@ -54,12 +56,13 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
     require root by design.
     """
     # ISO validation
-    if not iso_path.exists():
+    iso_info = fsprobe.probe(iso_path)
+    if not iso_info.exists:
         raise SystemExit(f"ERROR: ISO file does not exist: {iso_path}")
-    if not iso_path.is_file():
+    if not iso_info.is_file:
         raise SystemExit(f"ERROR: The given ISO path is not a file: {iso_path}")
 
-    iso_size = iso_path.stat().st_size
+    iso_size = iso_info.size
     print(f"[autoinstall-helper] ISO: {iso_path} ({iso_size / 1024**2:.1f} MB)")
 
     target_is_block = is_block_device(target)
@@ -83,9 +86,9 @@ def flash(iso_path: Path, target: Path, yes: bool = False) -> int:
                 raise SystemExit(
                     f"ERROR: Writing to block device {target} in non-interactive mode requires the -y / --yes flag."
                 )
-    elif target.exists():
+    elif (target_info := fsprobe.probe(target)).exists:
         total_size = iso_size + FLASH_EXTRA_BYTES
-        current_size = target.stat().st_size
+        current_size = target_info.size
         if current_size < total_size:
             print(
                 f"[autoinstall-helper] Target is an existing file {target} ({current_size / 1024**2:.1f} MB). "

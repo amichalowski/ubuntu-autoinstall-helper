@@ -4,6 +4,7 @@ We mock functions at the point of use (autoinstall_helper.cli.*), not at definit
 see AGENTS.md.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -288,3 +289,16 @@ def test_main_with_explicit_argv(monkeypatch):
     rc = cli.main(["validate", "my_autoinstall.yaml"])
     assert rc == 0
     assert called == {"called": True}
+
+
+def test_record_flag_wraps_dispatch(monkeypatch, tmp_path):
+    """--record must run dispatch inside a recording session and persist metadata."""
+    record = tmp_path / "session.json"
+    monkeypatch.setattr(cli, "dispatch", lambda args, parser: 0)
+
+    rc = cli.main(["--record", str(record), "validate", "autoinstall.yaml"])
+
+    assert rc == 0
+    data = json.loads(record.read_text(encoding="utf-8"))
+    assert data["metadata"]["exit_code"] == 0
+    assert data["metadata"]["schema_version"] == 1

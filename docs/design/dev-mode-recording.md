@@ -312,11 +312,7 @@ def _env_diff(env: dict[str, str] | None) -> dict[str, str] | None:
     """Return the environment keys that differ from the current process, with secrets redacted."""
     if env is None or env is os.environ:
         return None
-    diff = {
-        key: value
-        for key, value in env.items()
-        if os.environ.get(key) != value
-    }
+    diff = {key: value for key, value in env.items() if os.environ.get(key) != value}
     if not diff:
         return None
     return {
@@ -357,7 +353,9 @@ class Recorder:
 
     def _wrap_subprocess_run(self, cmd, /, **kwargs):
         """Call the real ``subprocess.run``, record the interaction, return it unchanged."""
-        captured = bool(kwargs.get("capture_output") or kwargs.get("stdout") is not None or kwargs.get("stderr") is not None)
+        captured = bool(
+            kwargs.get("capture_output") or kwargs.get("stdout") is not None or kwargs.get("stderr") is not None
+        )
         entry: dict[str, Any] = {
             "type": "subprocess",
             "timestamp": _now(),
@@ -737,6 +735,7 @@ parser.add_argument(
     default=None,
     help="Dev mode: record all subprocess/network interactions to FILE (pass before COMMAND)",
 )
+
 
 # In main():
 def main(argv: list[str] | None = None) -> int:

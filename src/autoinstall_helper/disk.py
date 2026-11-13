@@ -4,13 +4,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from autoinstall_helper import fsprobe
+
 
 def is_block_device(path: Path) -> bool:
     """Check whether the path points to a block device."""
-    try:
-        return path.stat().st_mode & 0o170000 == 0o060000
-    except OSError:
-        return False
+    return fsprobe.probe(path).is_block
 
 
 def fix_gpt_backup_header(target: Path | str) -> None:

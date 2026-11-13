@@ -29,7 +29,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
-from autoinstall_helper.disk import is_block_device
+from autoinstall_helper import fsprobe
 
 SYSTEM_URI = "qemu:///system"
 SESSION_URI = "qemu:///session"
@@ -472,14 +472,15 @@ def _finalize_spec(spec: VmSpec, uri: str, no_kvm: bool) -> VmSpec:
 
 def _validate_media(media: Path) -> None:
     """Validate that the installation media is an image file, not a block device."""
-    if not media.exists():
+    info = fsprobe.probe(media)
+    if not info.exists:
         raise SystemExit(f"ERROR: installation media image does not exist: {media}")
-    if is_block_device(media):
+    if info.is_block:
         raise SystemExit(
             "ERROR: block devices are not supported as VM media.\n"
             "Provide an image file (for example pendrive.img created by 'flash')."
         )
-    if not media.is_file():
+    if not info.is_file:
         raise SystemExit(f"ERROR: installation media is not a regular file: {media}")
 
 
