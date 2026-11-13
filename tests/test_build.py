@@ -5,7 +5,13 @@ import sys
 import zipfile
 from pathlib import Path
 
-from autoinstall_helper.build import build_zipapp, compute_docker_digest, exclude_pycache
+from autoinstall_helper.build import (
+    archive_filter,
+    build_zipapp,
+    compute_docker_digest,
+    exclude_dev_only,
+    exclude_pycache,
+)
 from autoinstall_helper.docker_utils import docker_image_tag, get_docker_digest, get_docker_dir
 
 
@@ -16,6 +22,19 @@ class TestBuildZipapp:
         assert exclude_pycache(Path("src/autoinstall_helper/cli.py")) is True
         assert exclude_pycache(Path("src/autoinstall_helper/__pycache__/cli.cpython-312.pyc")) is False
         assert exclude_pycache(Path("something/test.pyc")) is False
+
+    def test_exclude_dev_only(self):
+        assert exclude_dev_only(Path("src/autoinstall_helper/build.py")) is False
+        assert exclude_dev_only(Path("src/autoinstall_helper/recorder.py")) is False
+        assert exclude_dev_only(Path("src/autoinstall_helper/replayer.py")) is False
+        assert exclude_dev_only(Path("src/autoinstall_helper/interactions.py")) is False
+        assert exclude_dev_only(Path("src/autoinstall_helper/cli.py")) is True
+        assert exclude_dev_only(Path("src/autoinstall_helper/build.pyc")) is True
+
+    def test_archive_filter_combines_rules(self):
+        assert archive_filter(Path("src/autoinstall_helper/cli.py")) is True
+        assert archive_filter(Path("src/autoinstall_helper/build.py")) is False
+        assert archive_filter(Path("src/autoinstall_helper/__pycache__/cli.pyc")) is False
 
     def test_compute_docker_digest(self):
         docker_dir = Path("src/autoinstall_helper/docker")
@@ -38,6 +57,10 @@ class TestBuildZipapp:
             assert "autoinstall_helper/DOCKER_DIGEST" in names
             assert "autoinstall_helper/docker/Dockerfile" in names
             assert not any("__pycache__" in name for name in names)
+            # Dev-only modules are stripped from the release artifact
+            for module in ("build.py", "recorder.py", "replayer.py", "interactions.py"):
+                assert f"autoinstall_helper/{module}" not in names
+            assert "autoinstall_helper/fsprobe.py" in names  # production seam stays
 
             # Digest stored outside docker/ matches the computed digest
             stored = zf.read("autoinstall_helper/DOCKER_DIGEST").decode("utf-8").strip()
@@ -53,6 +76,25 @@ class TestBuildZipapp:
         )
         assert proc.returncode == 0
         assert "autoinstall-helper" in proc.stdout
+        # Dev-only flags must not leak into the release artifact
+        assert "--record" not in proc.stdout
+        assert "--record" not in proc.stderr
+
+    def test_packaged_artifact_rejects_record_flag(self, tmp_path: Path):
+        """The .pyz must not expose the dev-only --record option at all."""
+        target_pyz = tmp_path / "no-record.pyz"
+        build_zipapp(target=target_pyz)
+
+        proc = subprocess.run(
+            [sys.executable, str(target_pyz), "--record", str(tmp_path / "session.json"), "validate"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert proc.returncode == 2  # argparse usage error
+        assert "error:" in proc.stderr
+        assert not (tmp_path / "session.json").exists()
 
     def test_build_zipapp_propagates_exit_code(self, tmp_path: Path):
         """The generated __main__.py must exit with the entry point's status code."""

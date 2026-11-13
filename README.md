@@ -172,7 +172,7 @@ uv run ruff format --check .
 
 ### Dev mode: recording interactions (`--record`)
 
-The `--record` flag captures every `subprocess`, `urllib`, and filesystem-metadata interaction of a session into a single, committable JSON file. It is a **dev-only** feature (the flag must precede the subcommand):
+The `--record` flag captures every `subprocess`, `urllib`, and filesystem-metadata interaction of a session into a single, committable JSON file. It is a **dev-only** feature (the flag must precede the subcommand) and is not exposed by the packaged `.pyz`: `cli.build_parser()` registers it only when running from source, so the release artifact rejects `--record` as an unknown option.
 
 ```bash
 # Record a real session (run on a host with the required tools/devices)
@@ -216,6 +216,9 @@ chmod +x autoinstall-helper.pyz
 
 > [!NOTE]
 > When executing the `validate` command from within a `.pyz` archive, the required Docker build context assets (`Dockerfile`, `timedatectl.sh`, `validate-autoinstall.py`) are automatically and lazily extracted into a temporary directory in `/tmp` and cleaned up upon exit. Commands that do not use Docker (`flash`, `inject`, `extract`) never perform extraction.
+
+> [!NOTE]
+> The builder strips developer-only modules from the archive: `build.py` (the builder itself), `recorder.py`, `replayer.py`, and `interactions.py` (the `--record` machinery). Production code never imports them, so the packaged CLI cannot record sessions.
 
 ### Releases (GitHub Actions)
 

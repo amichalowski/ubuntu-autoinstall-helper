@@ -14,6 +14,21 @@ def exclude_pycache(path: Path) -> bool:
     return "__pycache__" not in path.parts and not path.name.endswith(".pyc")
 
 
+# Modules used only in development: the session recorder/replayer and the builder
+# itself. Production code never imports them, so they are left out of the artifact.
+DEV_ONLY_MODULES = frozenset({"build.py", "recorder.py", "replayer.py", "interactions.py"})
+
+
+def exclude_dev_only(path: Path) -> bool:
+    """Exclude developer-only modules from the archive."""
+    return not (path.suffix == ".py" and path.name in DEV_ONLY_MODULES)
+
+
+def archive_filter(path: Path) -> bool:
+    """Combine the filters passed to :func:`zipapp.create_archive`."""
+    return exclude_pycache(path) and exclude_dev_only(path)
+
+
 def compute_docker_digest(docker_dir: Path) -> str:
     """Compute a 12-character SHA-256 digest from the key files in the docker/ directory."""
     return compute_assets_digest(docker_dir)
@@ -51,7 +66,7 @@ def build_zipapp(
             target=target_path,
             interpreter="/usr/bin/env python3",
             main="autoinstall_helper.cli:zipapp_main",
-            filter=exclude_pycache,
+            filter=archive_filter,
         )
     finally:
         # Remove the temporary file from the source directory after packaging

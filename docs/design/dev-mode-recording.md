@@ -725,16 +725,17 @@ addopts = "-m 'not smoke and not replay'"
 
 ## CLI Integration
 
-Add a `--record` flag to the top-level parser in `cli.py` and wrap dispatching in `recording_session`:
+Add a `--record` flag to the top-level parser in `cli.py` and wrap dispatching in `recording_session`. The flag is registered only when running from source (`is_packaged_zipapp()` is `False`), so the packaged `.pyz` never exposes the recording capability:
 
 ```python
 # In build_parser():
-parser.add_argument(
-    "--record",
-    metavar="FILE",
-    default=None,
-    help="Dev mode: record all subprocess/network interactions to FILE (pass before COMMAND)",
-)
+if not is_packaged_zipapp():
+    parser.add_argument(
+        "--record",
+        metavar="FILE",
+        default=None,
+        help="Dev mode: record all subprocess/network interactions to FILE (pass before COMMAND)",
+    )
 
 
 # In main():
@@ -787,8 +788,8 @@ sequenceDiagram
 src/autoinstall_helper/
 ├── interactions.py      # NEW — Shared fake response + extraction helpers
 ├── fsprobe.py           # NEW — Filesystem metadata seam (never records contents)
-├── recorder.py          # NEW — Recording engine (dev mode)
-├── replayer.py          # NEW — Replay engine for tests
+├── recorder.py          # NEW — Recording engine (dev mode; excluded from the .pyz)
+├── replayer.py          # NEW — Replay engine for tests (excluded from the .pyz)
 ├── cli.py               # MODIFIED — --record flag + probe-based exists() checks
 ├── flash.py             # MODIFIED — route ISO/target metadata through fsprobe.probe
 ├── cidata.py            # MODIFIED — route target/yaml metadata through fsprobe.probe
@@ -813,6 +814,9 @@ pyproject.toml           # MODIFIED — register the `replay` marker + exclude i
 AGENTS.md                # MODIFIED — document the replay/component tier (on implementation)
 .github/workflows/ci.yml # MODIFIED — run `pytest -m replay` as a separate CI step (on implementation)
 ```
+
+> `interactions.py`, `recorder.py`, `replayer.py` and `build.py` are dev-only: `build.py`'s archive
+> filter drops them from the `.pyz`, and `is_packaged_zipapp()` hides the `--record` flag there.
 
 ## Design Decisions
 

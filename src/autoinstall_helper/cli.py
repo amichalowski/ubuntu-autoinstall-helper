@@ -35,6 +35,7 @@ The logic of each command lives in dedicated modules:
 import argparse
 import os
 import sys
+import zipimport
 from pathlib import Path
 
 from autoinstall_helper import fsprobe, vm
@@ -155,18 +156,28 @@ def validate(
     return rc
 
 
+def is_packaged_zipapp() -> bool:
+    """Return True when running from a packaged .pyz archive.
+
+    Dev-only features (such as ``--record``) are hidden from the release artifact
+    so a packaged CLI cannot capture session recordings.
+    """
+    return isinstance(globals().get("__loader__"), zipimport.zipimporter)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the command-line argument parser for autoinstall-helper."""
     parser = argparse.ArgumentParser(
         prog="autoinstall-helper",
         description="Tool for managing autoinstall configuration and Ubuntu installation media.",
     )
-    parser.add_argument(
-        "--record",
-        metavar="FILE",
-        default=None,
-        help="Dev mode: record all subprocess/network interactions to FILE (pass before COMMAND)",
-    )
+    if not is_packaged_zipapp():
+        parser.add_argument(
+            "--record",
+            metavar="FILE",
+            default=None,
+            help="Dev mode: record all subprocess/network interactions to FILE (pass before COMMAND)",
+        )
     subparsers = parser.add_subparsers(dest="subcommand", metavar="COMMAND")
 
     # validate
@@ -537,10 +548,11 @@ def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.record:
+    record_path = getattr(args, "record", None)
+    if record_path:
         from autoinstall_helper.recorder import recording_session
 
-        with recording_session(args.record) as rec:
+        with recording_session(record_path) as rec:
             rc = dispatch(args, parser)
             rec.exit_code = rc
         return rc

@@ -38,6 +38,14 @@ def test_unknown_command_exits_with_usage_error(run_artifact):
     assert "invalid choice" in proc.stderr
 
 
+def test_help_hides_dev_only_record_flag(run_artifact):
+    """The dev-only --record option must not be present in the release artifact."""
+    proc = run_artifact("--help", timeout=FAST_TIMEOUT_S)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "--record" not in proc.stdout
+
+
 def test_missing_config_file_fails_with_clear_error(run_artifact, tmp_path):
     missing = tmp_path / "does-not-exist.yaml"
     proc = run_artifact("validate", str(missing), timeout=FAST_TIMEOUT_S)
