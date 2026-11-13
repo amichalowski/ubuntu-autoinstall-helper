@@ -3,6 +3,7 @@ __pycache__
 .workshop.lock
 .venv/
 .venv-workshop/
+.githooks-workshop/
 dist/
 *.pyz
 *.egg-info/

@@ -1,8 +1,11 @@
 # Local hooks delegating to tools from dev-dependencies (versions pinned in
 # uv.lock, identical to CI): ruff plus Conventional Commits validation.
-# One-time setup per clone installs both hook types (see default_install_hook_types):
-#   uv run pre-commit install
-default_install_hook_types: [pre-commit, commit-msg]
+#
+# One-time setup per clone:
+#   pre-commit install
+# The hook path is resolved by git: the host uses the default .git/hooks, while
+# the dev workshop sets core.hooksPath to .githooks-workshop in /etc/gitconfig.
+# Each generated hook therefore hardcodes the interpreter of its own environment.
 repos:
   - repo: local
     hooks:

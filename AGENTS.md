@@ -36,6 +36,7 @@ Repository guidelines for AI agents working on **autoinstall-helper**.
 
 - Run `uv run ruff check .` and `uv run ruff format --check .` before committing. CI (`.github/workflows/ci.yml`, `lint` job) enforces the same commands and fails otherwise.
 - Ruff version is pinned via `uv.lock`, so local hooks, developers, and CI always use the identical version.
+- Git hooks are generated with `pre-commit install`. The host uses the default `.git/hooks`; the dev workshop sets `core.hooksPath = .githooks-workshop` in `/etc/gitconfig` (the global config is mounted read-only from the host), so each side gets a hook that hardcodes its own interpreter. The generated workshop directory is ignored by git.
 - Broad `except Exception` in CLI entry points and the Snap Store API fallback is an accepted pattern (`BLE001` globally ignored). Blocking `subprocess.run` calls must state intent explicitly: `check=True` or `check=False`.
 
 ## Commits & Signing

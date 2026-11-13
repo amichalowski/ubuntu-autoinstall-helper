@@ -16,13 +16,43 @@ profile="${HOME}/.profile"
 environment="${PWD}/.venv-workshop"
 
 touch "$profile"
-if grep -qF "UV_PROJECT_ENVIRONMENT" "$profile"; then
-    exit 0
-fi
-
-cat <<EOF >>"$profile"
+if ! grep -qF "UV_PROJECT_ENVIRONMENT" "$profile"; then
+    cat <<EOF >>"$profile"
 
 # Added by the 'uv-env' in-project SDK (autoinstall-helper):
 # keep the workshop's uv environment out of the shared project tree.
 export UV_PROJECT_ENVIRONMENT="${environment}"
 EOF
+fi
+
+# Git hooks: the project's .git is shared with the host, so the host's
+# .git/hooks must never be overwritten. Generate the hooks in a throwaway
+# git directory, copy them into the workshop-local directory, and point git
+# at it through the system-level config. The host's global config is mounted
+# read-only, so /etc/gitconfig is the only writable level.
+hooks_dir="${PWD}/.githooks-workshop"
+mkdir -p "$hooks_dir"
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+uv run --quiet python - "$tmp_dir" <<'PY'
+import sys
+
+from pre_commit.commands.install_uninstall import install
+from pre_commit.store import Store
+
+install(
+    config_file=".pre-commit-config.yaml",
+    store=Store(),
+    hook_types=["pre-commit", "commit-msg"],
+    git_dir=sys.argv[1],
+)
+PY
+
+cp "$tmp_dir/hooks/pre-commit" "$tmp_dir/hooks/commit-msg" "$hooks_dir/"
+chmod +x "$hooks_dir/pre-commit" "$hooks_dir/commit-msg"
+
+if ! sudo -n git config --system core.hooksPath .githooks-workshop; then
+    printf 'warning: could not set core.hooksPath in /etc/gitconfig; git hooks will not run in the workshop\n' >&2
+fi
