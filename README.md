@@ -60,7 +60,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 
 ## Key Features
 
-- **Automated and Safe Validation**: Runs validation inside an isolated Docker container matching the installer channel specified in the autoinstall YAML (e.g., `24.04/stable`, `26.04/stable`).
+- **Automated and Safe Validation**: Runs validation inside an isolated Docker container matching the installer channel specified in the autoinstall YAML (requires `26.04/stable` or newer; older installers do not ship Subiquity's built-in validator).
 - **Smart Version Resolution**: Automatically queries the Snap Store API for the required `ubuntu-desktop-bootstrap` version without needing `snapd` installed on the host.
 - **Media Preparation**: Safely writes ISO images to disks, USB flash drives, or virtual raw image files with automated space reservation (128 MB) for the `cidata` partition.
 - **`cidata` Partition Management**: Creates FAT32 partitions labeled `cidata`, injects `user-data` and `meta-data`, and extracts existing configurations from media.
@@ -134,6 +134,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 - **Docker** (required for every `validate` scope except `--validation snaps`):
   - Membership in the `docker` group (`sudo usermod -aG docker $USER`, then log out and back in); no `sudo` is needed to run the tool
   - Run `autoinstall-helper validate doctor` to check the host
+- **Installer channel `26.04` or newer** for container validation (older releases lack Subiquity's built-in validator API)
 - **System Utilities** (for disk operations: `flash`, `inject`, `extract`):
   - `sfdisk`, `parted`, `gdisk` / `sgdisk`
   - `mkfs.vfat` (`dosfstools`), `mtools`
@@ -267,6 +268,9 @@ Reads the installer channel from the YAML file, queries the Snap Store API for t
 
 > [!IMPORTANT]
 > The file **must** start with the `#cloud-config` header. Without it the command fails immediately with a clear error, before contacting the Snap Store or Docker.
+
+> [!NOTE]
+> Installer channels **older than `26.04`** are rejected: only `26.04` onwards ships Subiquity's built-in validator API (`parse_autoinstall`/`make_app`/`verify_autoinstall`) that the container uses. The error names the resolved version and points at `26.04/stable`. The host-side `--validation snaps` scope is unaffected and works with any config.
 
 ```bash
 # Check the host first (docker binary, daemon reachable, access without sudo)

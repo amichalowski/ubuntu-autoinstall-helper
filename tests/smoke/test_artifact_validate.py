@@ -134,7 +134,7 @@ def test_commands_scope_accepts_valid_commands(run_artifact, tmp_path):
         "  version: 1\n"
         "  refresh-installer:\n"
         "    update: true\n"
-        '    channel: "24.04/stable"\n'
+        '    channel: "26.04/stable"\n'
         "  late-commands:\n"
         "    - curtin in-target -- true\n"
         "    - bash -c 'echo hi'\n",

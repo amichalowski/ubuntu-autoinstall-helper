@@ -32,6 +32,11 @@ SNAP_RISKS = ("stable", "candidate", "beta", "edge")
 DEFAULT_SNAP_CHANNEL = "stable"
 DEFAULT_TRACK = "latest"
 
+# Subiquity ships the validator API used by docker/validate-autoinstall.py
+# (parse_autoinstall/make_app/verify_autoinstall) starting with the 26.04
+# release; older installers only expose the legacy main() entry point.
+MIN_VALIDATOR_VERSION = (26, 4)
+
 # Snap names and channel components are restricted to a small character set, so
 # an entry can never smuggle a path or query into the store URL.
 _SNAP_NAME_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")
@@ -233,6 +238,20 @@ def get_snap_version(channel: str) -> str:
         f"ERROR: Could not determine the snap version for channel '{channel}'. "
         f"Check the network connection or the channel name."
     )
+
+
+def supports_embedded_validator(version: str) -> bool:
+    """Return whether the installer version ships Subiquity's built-in validator API.
+
+    Only installers from 26.04 onwards expose parse_autoinstall/make_app/
+    verify_autoinstall, which the in-container validator imports.
+    """
+    parts = version.split(".")
+    try:
+        major, minor = int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        return False
+    return (major, minor) >= MIN_VALIDATOR_VERSION
 
 
 def _channel_confinement(entries: list[dict[str, Any]]) -> str | None:

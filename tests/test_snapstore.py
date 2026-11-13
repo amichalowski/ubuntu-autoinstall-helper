@@ -141,6 +141,22 @@ class TestGetSnapVersion:
             snapstore.get_snap_version(invalid_channel)
 
 
+class TestSupportsEmbeddedValidator:
+    """Tests for supports_embedded_validator(version)."""
+
+    @pytest.mark.parametrize("version", ["26.04", "26.04.1", "26.10", "27.04.2"])
+    def test_supported_versions(self, version):
+        assert snapstore.supports_embedded_validator(version) is True
+
+    @pytest.mark.parametrize("version", ["24.04.4.1", "25.10", "26.03"])
+    def test_older_versions_are_rejected(self, version):
+        assert snapstore.supports_embedded_validator(version) is False
+
+    @pytest.mark.parametrize("version", ["", "garbage", "26", "v26.04", "26.x"])
+    def test_unparsable_versions_are_rejected(self, version):
+        assert snapstore.supports_embedded_validator(version) is False
+
+
 class TestGetBaseImage:
     """Tests for get_base_image(version)."""
 

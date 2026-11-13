@@ -7,7 +7,7 @@ autoinstall:
 
   refresh-installer:
     update: true
-    channel: "24.04/stable"
+    channel: "26.04/stable"
 
   storage:
     layout:

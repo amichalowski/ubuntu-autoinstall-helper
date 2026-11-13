@@ -50,7 +50,7 @@ from autoinstall_helper.docker_utils import (
     get_docker_dir,
 )
 from autoinstall_helper.flash import flash
-from autoinstall_helper.snapstore import get_base_image, get_snap_version, validate_snaps
+from autoinstall_helper.snapstore import get_base_image, get_snap_version, supports_embedded_validator, validate_snaps
 
 # The positional CONFIG slot of `validate` doubles as an action name, so these
 # words are reserved (a configuration file literally named like one of them is
@@ -96,6 +96,14 @@ def validate(
 
     version = get_snap_version(channel)
     print(f"[autoinstall-helper] Installer version: {version}")
+    if not supports_embedded_validator(version):
+        raise SystemExit(
+            f"ERROR: Installer version '{version}' does not ship Subiquity's built-in validator.\n"
+            f"Only installers from 26.04 onwards expose the validation API used by this tool; "
+            f"older releases cannot be validated in the container.\n"
+            f"Point 'autoinstall.refresh-installer.channel' at '26.04/stable' or newer.\n"
+            f"Hint: 'validate <config> --validation snaps' works without the container."
+        )
 
     tag = docker_image_tag(version)
     if docker_image_exists(tag):

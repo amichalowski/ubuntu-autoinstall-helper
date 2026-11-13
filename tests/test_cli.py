@@ -123,7 +123,7 @@ class TestValidateEntrypoint:
     def test_full_reports_a_snap_failure_after_a_clean_docker_run(self, monkeypatch, tmp_path):
         config = self._config(tmp_path)
         monkeypatch.setattr(cli, "validate_snaps", lambda entries: False)
-        monkeypatch.setattr(cli, "get_snap_version", lambda channel: "1.0")
+        monkeypatch.setattr(cli, "get_snap_version", lambda channel: "26.04.1")
         monkeypatch.setattr(cli, "docker_image_tag", lambda version: "validator:1")
         monkeypatch.setattr(cli, "docker_image_exists", lambda tag: True)
         monkeypatch.setattr(cli, "docker_validate", lambda *a, **k: 0)
@@ -133,12 +133,27 @@ class TestValidateEntrypoint:
     def test_full_passes_only_when_both_layers_pass(self, monkeypatch, tmp_path):
         config = self._config(tmp_path)
         monkeypatch.setattr(cli, "validate_snaps", lambda entries: True)
-        monkeypatch.setattr(cli, "get_snap_version", lambda channel: "1.0")
+        monkeypatch.setattr(cli, "get_snap_version", lambda channel: "26.04.1")
         monkeypatch.setattr(cli, "docker_image_tag", lambda version: "validator:1")
         monkeypatch.setattr(cli, "docker_image_exists", lambda tag: True)
         monkeypatch.setattr(cli, "docker_validate", lambda *a, **k: 0)
 
         assert cli.validate(config, validation="full") == 0
+
+    def test_old_installer_version_fails_with_an_explanation(self, monkeypatch, tmp_path):
+        """Installer versions before 26.04 lack Subiquity's validator API."""
+        config = self._config(tmp_path)
+        monkeypatch.setattr(cli, "validate_snaps", lambda entries: True)
+        monkeypatch.setattr(cli, "get_snap_version", lambda channel: "24.04.4.1")
+        monkeypatch.setattr(cli, "docker_image_exists", lambda tag: pytest.fail("Docker must not run"))
+
+        with pytest.raises(SystemExit) as excinfo:
+            cli.validate(config, validation="storage")
+
+        message = str(excinfo.value)
+        assert "24.04.4.1" in message
+        assert "26.04" in message
+        assert "--validation snaps" in message
 
 
 def test_validate_doctor_dispatch(monkeypatch, run):
