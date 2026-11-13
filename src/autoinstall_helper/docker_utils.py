@@ -1,4 +1,4 @@
-"""Management of the validator Docker image and docker/ directory assets."""
+"""Management of the validator Docker image, their local cache, and docker/ directory assets."""
 
 import atexit
 import functools
@@ -7,11 +7,16 @@ import hashlib
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 DOCKER_IMAGE_REPO = "ubuntu-desktop-bootstrap"
+
+# Fields of `docker image ls --format` used to describe a validator image.
+DOCKER_IMAGE_FIELDS = ("Repository", "Tag", "ID", "CreatedSince", "Size")
 
 # Validator assets hashed into the image tag; order is significant and must stay stable.
 DOCKER_ASSET_FILES = ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py")
@@ -195,8 +200,13 @@ def _docker_server_version() -> tuple[str | None, str]:
     )
     if res.returncode == 0 and res.stdout.strip():
         return res.stdout.strip(), ""
+    return None, _stderr_summary(res, "the Docker daemon is not reachable")
+
+
+def _stderr_summary(res: subprocess.CompletedProcess, fallback: str) -> str:
+    """Return the last non-empty stderr line (Docker repeats the cause in earlier lines)."""
     lines = [line.strip() for line in (res.stderr or "").splitlines() if line.strip()]
-    return None, lines[-1] if lines else "the Docker daemon is not reachable"
+    return lines[-1] if lines else fallback
 
 
 def _docker_group_membership() -> bool | None:
@@ -255,3 +265,124 @@ def docker_doctor() -> int:
         else "[autoinstall-helper] Docker support is NOT ready."
     )
     return 0 if ready else 1
+
+
+@dataclass(frozen=True)
+class ValidatorImage:
+    """A validator image present in the local Docker store.
+
+    ``version`` and ``digest`` are parsed from the ``<version>-<digest>`` tag
+    produced by :func:`docker_image_tag`; both are None for images built by hand.
+    """
+
+    tag: str
+    image_id: str
+    created: str
+    size: str
+    version: str | None = None
+    digest: str | None = None
+
+    def status(self, current_digest: str) -> str:
+        """Return 'current', 'stale' or 'unrecognized' relative to the bundled assets."""
+        if self.digest is None:
+            return "unrecognized"
+        return "current" if self.digest == current_digest else "stale"
+
+    def is_prunable(self, current_digest: str) -> bool:
+        """An image can be pruned once it no longer matches the bundled assets."""
+        return self.status(current_digest) != "current"
+
+
+def list_validator_images() -> list[ValidatorImage]:
+    """Return the validator images in the local Docker store (newest first)."""
+    image_format = "\t".join(f"{{{{.{field}}}}}" for field in DOCKER_IMAGE_FIELDS)
+    res = subprocess.run(
+        ["docker", "image", "ls", DOCKER_IMAGE_REPO, "--format", image_format],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if res.returncode != 0:
+        error = _stderr_summary(res, "docker image ls failed")
+        raise SystemExit(
+            f"ERROR: Could not list validator images: {error}\n"
+            "Hint: run 'autoinstall-helper validate doctor' to check the Docker setup."
+        )
+
+    images = []
+    for line in res.stdout.splitlines():
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        repository, tag, image_id, created, size = (fields + [""] * len(DOCKER_IMAGE_FIELDS))[
+            : len(DOCKER_IMAGE_FIELDS)
+        ]
+        version, separator, digest = tag.rpartition("-")
+        images.append(
+            ValidatorImage(
+                tag=f"{repository}:{tag}",
+                image_id=image_id,
+                created=created,
+                size=size,
+                version=version if separator else None,
+                digest=digest if separator else None,
+            )
+        )
+    return images
+
+
+def docker_images(*, prune: bool = False, remove_all: bool = False, dry_run: bool = False, yes: bool = False) -> int:
+    """List the validator images and optionally prune the ones built from outdated assets.
+
+    Staleness is network-free: the digest embedded in the tag is compared with
+    the digest of the bundled docker/ assets.
+    """
+    current_digest = get_docker_digest()
+    images = list_validator_images()
+
+    print(f"[autoinstall-helper] Validator images (bundled assets digest: {current_digest})")
+    if not images:
+        print("[autoinstall-helper]   none — 'validate <config>' builds one on demand")
+    for image in images:
+        print(
+            f"[autoinstall-helper]   {image.tag:<48} {image.size:>8}  {image.created:<16} {image.status(current_digest)}"
+        )
+
+    if not prune:
+        return 0
+
+    targets = images if remove_all else [image for image in images if image.is_prunable(current_digest)]
+    if not targets:
+        scope = "validator images" if remove_all else "stale validator images"
+        print(f"[autoinstall-helper] Nothing to prune: no {scope}.")
+        return 0
+
+    action = "Would remove" if dry_run else "Removing"
+    print(f"[autoinstall-helper] {action} {len(targets)} validator image(s):")
+    for image in targets:
+        print(f"[autoinstall-helper]   {image.tag}")
+    if dry_run:
+        return 0
+
+    if not yes:
+        if not sys.stdin.isatty():
+            raise SystemExit("ERROR: --prune in non-interactive mode requires -y / --yes.")
+        answer = input("[autoinstall-helper] Remove these images? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("[autoinstall-helper] Cancelled by user.")
+            return 1
+
+    removed = 0
+    for image in targets:
+        res = subprocess.run(["docker", "image", "rm", image.tag], capture_output=True, text=True, check=False)
+        if res.returncode == 0:
+            removed += 1
+            print(f"[autoinstall-helper]   removed {image.tag}")
+        else:
+            error = _stderr_summary(res, "docker image rm failed")
+            print(f"[autoinstall-helper]   FAILED {image.tag}: {error}", file=sys.stderr)
+
+    failed = len(targets) - removed
+    summary = f"[autoinstall-helper] Removed {removed} of {len(targets)} image(s)"
+    print(summary + (f" ({failed} failed)." if failed else "."))
+    return 0 if failed == 0 else 1

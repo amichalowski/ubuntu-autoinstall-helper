@@ -104,7 +104,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 │   ├── test_cli.py                            # CLI parsing, dispatch and root-privilege tests
 │   ├── test_config.py                         # autoinstall.yaml parsing tests
 │   ├── test_cidata.py                         # cidata helper tests
-│   ├── test_docker_utils.py                   # Docker preflight (`validate doctor`) tests
+│   ├── test_docker_utils.py                   # Docker preflight (`validate doctor`) and image management tests
 │   ├── test_vm.py                             # libvirt VM command construction and XML tests
 │   ├── test_validate_autoinstall.py           # Subiquity/Curtin validation and normalization tests
 │   ├── replay/                                # Recorded-replay component tier (marker: replay; scaffolded)
@@ -282,7 +282,18 @@ uv run autoinstall-helper validate wrong-autoinstall/autoinstall-wrong-storage.y
 #   --validation autoinstall (Subiquity only)
 #   --validation storage     (storage only: structure pre-validation + Curtin schema)
 uv run autoinstall-helper validate wrong-autoinstall/autoinstall-wrong-storage.yaml --validation storage
+
+# List the validator images built so far (tag, size, age, digest status)
+uv run autoinstall-helper validate images
+
+# Remove images built from outdated docker/ assets (old digest in the tag):
+uv run autoinstall-helper validate images --prune --dry-run   # preview
+uv run autoinstall-helper validate images --prune -y          # remove
+# ... or wipe every validator image to reclaim disk space:
+uv run autoinstall-helper validate images --prune --all -y
 ```
+
+Images are tagged `<version>-<digest>`, where the digest covers the bundled `Dockerfile`, `timedatectl.sh` and `validate-autoinstall.py`. `validate images` compares that tag against the assets shipped with the running tool (no network), so `stale` means "built before the validator assets changed" — the next `validate` run rebuilds it automatically.
 
 ### 2. Flashing ISO Image (`flash`)
 

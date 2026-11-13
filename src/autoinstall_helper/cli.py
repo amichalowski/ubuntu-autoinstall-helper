@@ -5,7 +5,8 @@ Available commands:
   - validate: reads the channel from autoinstall.yaml, resolves the version
     via `snap info`, builds the Docker image (if missing) and runs the
     Subiquity validator inside the container. `validate doctor` checks the
-    Docker host instead (binary present, daemon reachable, no sudo needed).
+    Docker host instead (binary present, daemon reachable, no sudo needed) and
+    `validate images` lists or prunes the locally built validator images.
   - flash: writes an ISO image to the target (block device or file),
     creating the target file with fallocate if it does not exist yet.
   - inject: embeds autoinstall.yaml in the 'cidata' (FAT32) partition on the
@@ -40,11 +41,17 @@ from autoinstall_helper.docker_utils import (
     docker_doctor,
     docker_image_exists,
     docker_image_tag,
+    docker_images,
     docker_validate,
     get_docker_dir,
 )
 from autoinstall_helper.flash import flash
 from autoinstall_helper.snapstore import get_base_image, get_snap_version
+
+# The positional CONFIG slot of `validate` doubles as an action name, so these
+# words are reserved (a configuration file literally named like one of them is
+# passed as './doctor' or './images').
+VALIDATE_ACTIONS = ("doctor", "images")
 
 
 def _require_root(action: str) -> None:
@@ -110,7 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate the autoinstall.yaml file in a Docker container",
         description=(
             "Validate the autoinstall.yaml file in a Docker container. "
-            "Use 'validate doctor' to check whether the host can run Docker without sudo."
+            "The first argument also accepts the actions 'doctor' (Docker preflight check) "
+            "and 'images' (list and prune the validator images)."
         ),
     )
     p_val.add_argument(
@@ -118,7 +126,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         type=Path,
         default=Path("autoinstall.yaml"),
-        help="Path to the YAML file (default: autoinstall.yaml)",
+        metavar="CONFIG|ACTION",
+        help="Path to the YAML file (default: autoinstall.yaml), or the action 'doctor' / 'images'",
     )
     p_val.add_argument(
         "--validation",
@@ -128,6 +137,28 @@ def build_parser() -> argparse.ArgumentParser:
             "Validation scope: autoinstall (Subiquity), storage (storage actions + "
             "Curtin schema), full (both checks; default)"
         ),
+    )
+    p_val.add_argument(
+        "--prune",
+        action="store_true",
+        help="'images' action: remove validator images built from outdated docker/ assets",
+    )
+    p_val.add_argument(
+        "--all",
+        dest="remove_all",
+        action="store_true",
+        help="'images' action: with --prune, remove every validator image",
+    )
+    p_val.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="'images' action: print what --prune would remove without removing anything",
+    )
+    p_val.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="'images' action: skip the confirmation prompt before pruning",
     )
 
     # flash
@@ -375,9 +406,19 @@ def _dispatch_vm(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
 def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """Dispatch the parsed command-line arguments to the appropriate handler."""
     if args.subcommand == "validate":
-        # 'validate doctor' is the Docker preflight check (the 'vm doctor' equivalent).
-        # A configuration file literally named 'doctor' can be passed as './doctor'.
-        if str(args.config) == "doctor":
+        action = str(args.config)
+        image_flags = args.prune or args.remove_all or args.dry_run or args.yes
+        # Image management options must not be silently ignored by a plain validation run.
+        if image_flags and action != "images":
+            parser.error("--prune/--all/--dry-run/--yes are only valid with 'validate images'")
+        if action == "images":
+            return docker_images(
+                prune=args.prune,
+                remove_all=args.remove_all,
+                dry_run=args.dry_run,
+                yes=args.yes,
+            )
+        if action == "doctor":
             return docker_doctor()
         return validate(args.config, validation=args.validation)
 

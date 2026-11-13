@@ -63,6 +63,35 @@ def test_validate_doctor_propagates_failure(monkeypatch, run):
     assert run("validate", "doctor") == 1
 
 
+def test_validate_images_dispatch(monkeypatch, run):
+    """'validate images' forwards the image-management flags instead of validating."""
+    seen = {}
+    monkeypatch.setattr(cli, "docker_images", lambda **kwargs: seen.update(kwargs) or 0)
+    monkeypatch.setattr(cli, "validate", lambda cfg, validation: pytest.fail("validate must not run"))
+
+    assert run("validate", "images", "--prune", "--all", "--dry-run", "-y") == 0
+
+    assert seen == {"prune": True, "remove_all": True, "dry_run": True, "yes": True}
+
+
+def test_validate_images_defaults(monkeypatch, run):
+    seen = {}
+    monkeypatch.setattr(cli, "docker_images", lambda **kwargs: seen.update(kwargs) or 0)
+
+    assert run("validate", "images") == 0
+
+    assert seen == {"prune": False, "remove_all": False, "dry_run": False, "yes": False}
+
+
+@pytest.mark.parametrize("argv", [("doctor", "--prune"), ("autoinstall.yaml", "--prune"), ("--prune",)])
+def test_image_flags_require_the_images_action(run, argv):
+    """Image flags are rejected when the action is not 'images' (no silent no-ops)."""
+    with pytest.raises(SystemExit) as excinfo:
+        run("validate", *argv)
+
+    assert excinfo.value.code == 2
+
+
 # ---------------------------------------------------------------------------
 # flash
 # ---------------------------------------------------------------------------
