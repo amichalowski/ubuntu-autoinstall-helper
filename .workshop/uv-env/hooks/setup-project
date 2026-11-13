@@ -6,14 +6,21 @@
 # interpreters: each side recreates the environment built by the other one.
 # Point the workshop at a private project environment instead.
 #
-# UV_PROJECT_ENVIRONMENT is read from the login shell environment, so the
-# export is appended to ~/.profile (which the workshop's login shells source).
-# The guard keeps the file stable when the hook runs more than once.
+# UV_PROJECT_ENVIRONMENT is exported for later login shells through ~/.profile
+# (which the workshop's login shells source). The guard keeps the file stable
+# when the hook runs more than once.
 
 set -euo pipefail
 
 profile="${HOME}/.profile"
 environment="${PWD}/.venv-workshop"
+
+# ~/.profile only affects shells started after this run, so the hook must not
+# rely on it: without the export the `uv run` below resolves the shared .venv
+# (the host's environment) and pins the generated hooks to a host interpreter
+# that does not exist in the container. The hooks then die with "`pre-commit`
+# not found" as soon as the host rewrites .venv.
+export UV_PROJECT_ENVIRONMENT="$environment"
 
 touch "$profile"
 if ! grep -qF "UV_PROJECT_ENVIRONMENT" "$profile"; then
@@ -49,6 +56,21 @@ install(
     git_dir=sys.argv[1],
 )
 PY
+
+# Guard against the pin silently regressing to the shared environment. The
+# check runs before the copy, so a broken pin never replaces hooks that work.
+for hook in pre-commit commit-msg; do
+    python_pin="$(sed -n 's/^INSTALL_PYTHON=//p' "$tmp_dir/hooks/$hook")"
+    case "$python_pin" in
+        "${environment}"/bin/python*) ;;
+        *)
+            printf 'error: %s would be pinned to %s, not to the workshop environment (%s/bin/python)\n' \
+                "$hook" "${python_pin:-<unset>}" "$environment" >&2
+            printf 'error: such a hook breaks once the host rewrites the shared .venv\n' >&2
+            exit 1
+            ;;
+    esac
+done
 
 cp "$tmp_dir/hooks/pre-commit" "$tmp_dir/hooks/commit-msg" "$hooks_dir/"
 chmod +x "$hooks_dir/pre-commit" "$hooks_dir/commit-msg"
