@@ -42,6 +42,10 @@ MIN_VALIDATOR_VERSION = (26, 4)
 _SNAP_NAME_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")
 _SNAP_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
 
+# Ubuntu LTS releases ship in April of even years, so their snap tracks look
+# like '24.04' or '26.04' (a two-digit even year followed by '.04').
+_LTS_TRACK_PATTERN = re.compile(r"^(\d{2})\.04$")
+
 ARCH_MAP = {
     "x86_64": "amd64",
     "aarch64": "arm64",
@@ -238,6 +242,41 @@ def get_snap_version(channel: str) -> str:
         f"ERROR: Could not determine the snap version for channel '{channel}'. "
         f"Check the network connection or the channel name."
     )
+
+
+def latest_lts_channel(snap_name: str = SNAP_NAME) -> str:
+    """Return the ``<track>/stable`` channel of the newest Ubuntu LTS in the store.
+
+    Used as the fallback installer channel when the autoinstall configuration
+    does not pin ``refresh-installer.channel``.  The store publishes one track
+    per Ubuntu release, so the newest LTS is simply the highest even-year
+    ``XX.04`` track that has a published ``stable`` risk.  Nothing is hardcoded,
+    so the fallback follows 28.04 (and later) on its own.
+
+    Raises :class:`SnapStoreError` when the store cannot be queried or exposes
+    no LTS track, so the caller can degrade with a clear message.
+    """
+    info = fetch_snap_info(snap_name)
+    if info is None:
+        raise SnapStoreError(f"snap {snap_name!r} does not exist in the Snap Store")
+
+    lts_tracks: set[str] = set()
+    for entry in _channel_map(info):
+        channel = entry.get("channel")
+        if not isinstance(channel, dict) or channel.get("risk") != "stable":
+            continue
+        track = channel.get("track")
+        if not isinstance(track, str):
+            continue
+        match = _LTS_TRACK_PATTERN.match(track)
+        if match and int(match.group(1)) % 2 == 0:
+            lts_tracks.add(track)
+
+    if not lts_tracks:
+        raise SnapStoreError(f"no Ubuntu LTS channel is published for {snap_name!r}")
+
+    latest = max(lts_tracks, key=lambda track: tuple(int(part) for part in track.split(".")))
+    return f"{latest}/stable"
 
 
 def supports_embedded_validator(version: str) -> bool:

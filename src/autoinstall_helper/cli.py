@@ -2,8 +2,10 @@
 """Tool for managing the autoinstall.yaml file.
 
 Available commands:
-  - validate: reads the channel from autoinstall.yaml, resolves the version
-    via `snap info`, builds the Docker image (if missing) and runs the
+  - validate: reads the channel from autoinstall.yaml (falling back to the
+    latest Ubuntu LTS channel when `refresh-installer.channel` is absent),
+    resolves the version via the Snap Store, builds the Docker image (if
+    missing) and runs the
     Subiquity/Curtin validator plus the shell-syntax check of the
     early/late/error commands inside the container. The `snaps:` section is
     checked against the Snap Store on the host (no Docker needed for
@@ -50,7 +52,14 @@ from autoinstall_helper.docker_utils import (
     get_docker_dir,
 )
 from autoinstall_helper.flash import flash
-from autoinstall_helper.snapstore import get_base_image, get_snap_version, supports_embedded_validator, validate_snaps
+from autoinstall_helper.snapstore import (
+    SnapStoreError,
+    get_base_image,
+    get_snap_version,
+    latest_lts_channel,
+    supports_embedded_validator,
+    validate_snaps,
+)
 
 # The positional CONFIG slot of `validate` doubles as an action name, so these
 # words are reserved (a configuration file literally named like one of them is
@@ -92,7 +101,20 @@ def validate(
         return 0 if snaps_clean else 1
 
     channel = extract_installer_channel(config_file)
-    print(f"[autoinstall-helper] Installer channel: {channel}")
+    if channel is None:
+        try:
+            channel = latest_lts_channel()
+        except SnapStoreError as exc:
+            raise SystemExit(
+                f"ERROR: No 'autoinstall.refresh-installer.channel' in {config_file} and the latest "
+                f"Ubuntu LTS channel could not be resolved from the Snap Store ({exc}).\n"
+                f"Set 'autoinstall.refresh-installer.channel' explicitly (e.g. '26.04/stable')."
+            ) from exc
+        print(
+            f"[autoinstall-helper] No 'refresh-installer.channel' found; assuming the latest LTS installer: {channel}"
+        )
+    else:
+        print(f"[autoinstall-helper] Installer channel: {channel}")
 
     version = get_snap_version(channel)
     print(f"[autoinstall-helper] Installer version: {version}")

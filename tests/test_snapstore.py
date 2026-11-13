@@ -141,6 +141,57 @@ class TestGetSnapVersion:
             snapstore.get_snap_version(invalid_channel)
 
 
+class TestLatestLtsChannel:
+    """Tests for latest_lts_channel()."""
+
+    @staticmethod
+    def _entry(track: str, risk: str = "stable") -> dict:
+        return {"channel": {"name": f"{track}/{risk}", "track": track, "risk": risk, "architecture": "amd64"}}
+
+    def test_picks_the_highest_even_april_track(self, monkeypatch):
+        info = _snap_info(
+            [
+                self._entry("latest"),
+                self._entry("24.04"),
+                self._entry("24.10"),
+                self._entry("25.04"),
+                self._entry("26.04"),
+                self._entry("26.10"),
+            ]
+        )
+        _install_store(monkeypatch, {"ubuntu-desktop-bootstrap": info})
+
+        assert snapstore.latest_lts_channel() == "26.04/stable"
+
+    def test_ignores_non_stable_and_non_lts_tracks(self, monkeypatch):
+        info = _snap_info(
+            [
+                self._entry("28.04", risk="edge"),
+                self._entry("27.10"),
+                self._entry("26.04"),
+            ]
+        )
+        _install_store(monkeypatch, {"ubuntu-desktop-bootstrap": info})
+
+        assert snapstore.latest_lts_channel() == "26.04/stable"
+
+    def test_no_lts_track_raises(self, monkeypatch):
+        info = _snap_info([self._entry("latest"), self._entry("25.10")])
+        _install_store(monkeypatch, {"ubuntu-desktop-bootstrap": info})
+
+        with pytest.raises(snapstore.SnapStoreError, match="no Ubuntu LTS channel"):
+            snapstore.latest_lts_channel()
+
+    def test_missing_snap_raises(self, monkeypatch):
+        _install_store(
+            monkeypatch,
+            {"ubuntu-desktop-bootstrap": urllib.error.HTTPError("url", 404, "Not Found", None, None)},
+        )
+
+        with pytest.raises(snapstore.SnapStoreError, match="does not exist"):
+            snapstore.latest_lts_channel()
+
+
 class TestSupportsEmbeddedValidator:
     """Tests for supports_embedded_validator(version)."""
 

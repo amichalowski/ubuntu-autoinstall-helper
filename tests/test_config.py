@@ -92,7 +92,7 @@ autoinstall:
         )
         assert extract_installer_channel(cfg) == "latest/edge"
 
-    def test_missing_channel_field_raises(self, tmp_path: Path):
+    def test_missing_channel_field_returns_none(self, tmp_path: Path):
         cfg = tmp_path / "autoinstall.yaml"
         cfg.write_text(
             """
@@ -102,11 +102,21 @@ autoinstall:
 """,
             encoding="utf-8",
         )
-        with pytest.raises(SystemExit) as exc_info:
-            extract_installer_channel(cfg)
-        assert "Field 'autoinstall.refresh-installer.channel' not found" in str(exc_info.value)
+        assert extract_installer_channel(cfg) is None
 
-    def test_missing_refresh_installer_raises(self, tmp_path: Path):
+    def test_blank_channel_returns_none(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text(
+            """
+autoinstall:
+  refresh-installer:
+    channel: "   "
+""",
+            encoding="utf-8",
+        )
+        assert extract_installer_channel(cfg) is None
+
+    def test_missing_refresh_installer_returns_none(self, tmp_path: Path):
         cfg = tmp_path / "autoinstall.yaml"
         cfg.write_text(
             """
@@ -115,16 +125,17 @@ autoinstall:
 """,
             encoding="utf-8",
         )
-        with pytest.raises(SystemExit) as exc_info:
-            extract_installer_channel(cfg)
-        assert "Field 'autoinstall.refresh-installer.channel' not found" in str(exc_info.value)
+        assert extract_installer_channel(cfg) is None
 
-    def test_missing_autoinstall_key_raises(self, tmp_path: Path):
+    def test_missing_autoinstall_key_returns_none(self, tmp_path: Path):
         cfg = tmp_path / "autoinstall.yaml"
         cfg.write_text("other_key: 123\n", encoding="utf-8")
-        with pytest.raises(SystemExit) as exc_info:
-            extract_installer_channel(cfg)
-        assert "Field 'autoinstall.refresh-installer.channel' not found" in str(exc_info.value)
+        assert extract_installer_channel(cfg) is None
+
+    def test_non_mapping_refresh_installer_returns_none(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text("autoinstall:\n  refresh-installer: true\n", encoding="utf-8")
+        assert extract_installer_channel(cfg) is None
 
 
 class TestExtractSnaps:

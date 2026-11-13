@@ -3,17 +3,28 @@
 from pathlib import Path
 
 
-def extract_installer_channel(config_file: Path) -> str:
-    """Extract the autoinstall.refresh-installer.channel value from the YAML file."""
+def extract_installer_channel(config_file: Path) -> str | None:
+    """Extract the autoinstall.refresh-installer.channel value from the YAML file.
+
+    Returns None when the entry is absent (no ``refresh-installer`` block, no
+    ``channel`` key, or no ``autoinstall`` mapping at all); the caller decides
+    on a fallback.
+    """
     # Lazy import: pyyaml is available in Ubuntu environments (python3-yaml)
     # and dev environments, but production code keeps zero hard dependencies in [project.dependencies].
     import yaml  # type: ignore[import-untyped]
 
     data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-    channel = data.get("autoinstall", {}).get("refresh-installer", {}).get("channel")
+    autoinstall = data.get("autoinstall") if isinstance(data, dict) else None
+    if not isinstance(autoinstall, dict):
+        return None
+    refresh = autoinstall.get("refresh-installer")
+    if not isinstance(refresh, dict):
+        return None
+    channel = refresh.get("channel")
     if not channel:
-        raise SystemExit(f"ERROR: Field 'autoinstall.refresh-installer.channel' not found in {config_file}")
-    return str(channel).strip()
+        return None
+    return str(channel).strip() or None
 
 
 def extract_snaps(config_file: Path) -> object:

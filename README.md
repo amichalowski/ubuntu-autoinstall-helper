@@ -264,13 +264,16 @@ You can run commands either via `uv run autoinstall-helper` (in dev) or via `./a
 
 ### 1. Configuration Validation (`validate`)
 
-Reads the installer channel from the YAML file, queries the Snap Store API for the exact package version, builds the Docker container (if not already cached), and runs multi-layer validation:
+Reads the installer channel from the YAML file, queries the Snap Store API for the exact package version, builds the Docker container (if not already cached), and runs multi-layer validation. When the config has no `autoinstall.refresh-installer.channel`, the latest Ubuntu LTS channel is resolved from the Snap Store's channel map and used as the fallback:
 
 > [!IMPORTANT]
 > The file **must** start with the `#cloud-config` header. Without it the command fails immediately with a clear error, before contacting the Snap Store or Docker.
 
 > [!NOTE]
 > Installer channels **older than `26.04`** are rejected: only `26.04` onwards ships Subiquity's built-in validator API (`parse_autoinstall`/`make_app`/`verify_autoinstall`) that the container uses. The error names the resolved version and points at `26.04/stable`. The host-side `--validation snaps` scope is unaffected and works with any config.
+
+> [!NOTE]
+> The latest-LTS fallback is a pragmatic assumption: without `refresh-installer` the installer is not refreshed, so the real Subiquity version is whichever one shipped on the ISO. Pin `autoinstall.refresh-installer.channel` explicitly when the target release matters.
 
 ```bash
 # Check the host first (docker binary, daemon reachable, access without sudo)

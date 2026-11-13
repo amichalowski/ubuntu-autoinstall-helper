@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from autoinstall_helper import cli
+from autoinstall_helper import cli, snapstore
 
 
 @pytest.fixture
@@ -154,6 +154,39 @@ class TestValidateEntrypoint:
         assert "24.04.4.1" in message
         assert "26.04" in message
         assert "--validation snaps" in message
+
+    def test_missing_channel_falls_back_to_latest_lts(self, monkeypatch, tmp_path):
+        """Without a pinned channel the latest LTS installer is assumed."""
+        config = tmp_path / "autoinstall.yaml"
+        config.write_text("#cloud-config\nautoinstall:\n  version: 1\n", encoding="utf-8")
+        seen = {}
+
+        monkeypatch.setattr(cli, "latest_lts_channel", lambda: "26.04/stable")
+        monkeypatch.setattr(cli, "get_snap_version", lambda channel: seen.update(channel=channel) or "26.04.1")
+        monkeypatch.setattr(cli, "docker_image_tag", lambda version: "validator:1")
+        monkeypatch.setattr(cli, "docker_image_exists", lambda tag: True)
+        monkeypatch.setattr(cli, "docker_validate", lambda *a, **k: 0)
+
+        assert cli.validate(config, validation="storage") == 0
+        assert seen == {"channel": "26.04/stable"}
+
+    def test_missing_channel_with_store_error_exits(self, monkeypatch, tmp_path):
+        """A store failure while guessing the LTS must not leak a traceback."""
+        config = tmp_path / "autoinstall.yaml"
+        config.write_text("#cloud-config\nautoinstall:\n  version: 1\n", encoding="utf-8")
+
+        def _boom():
+            raise snapstore.SnapStoreError("network down")
+
+        monkeypatch.setattr(cli, "latest_lts_channel", _boom)
+        monkeypatch.setattr(cli, "get_snap_version", lambda channel: pytest.fail("must not resolve a version"))
+
+        with pytest.raises(SystemExit) as excinfo:
+            cli.validate(config, validation="storage")
+
+        message = str(excinfo.value)
+        assert "refresh-installer.channel" in message
+        assert "network down" in message
 
 
 def test_validate_doctor_dispatch(monkeypatch, run):
