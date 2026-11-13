@@ -1,42 +1,197 @@
-"""Snap Store queries and 'base' to Ubuntu image mapping."""
+"""Snap Store queries, snap validation and 'base' to Ubuntu image mapping."""
 
 import json
 import platform
 import re
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
+from typing import Any
 
 SNAP_NAME = "ubuntu-desktop-bootstrap"
-CHANNEL_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)*$")
+
+SNAP_STORE_INFO_URL = "https://api.snapcraft.io/v2/snaps/info/{name}"
+# The store returns a channel entry only with the fields named here, so
+# `confinement` (snap validation) and `version` (channel resolution) must both
+# be requested explicitly.
+SNAP_STORE_FIELDS = "channel-map,confinement,version"
+SNAP_STORE_SERIES = "16"
+SNAP_STORE_TIMEOUT_S = 15
+
+# The store rate-limits bursty clients, so transient failures are retried.
+SNAP_STORE_MAX_ATTEMPTS = 3
+SNAP_STORE_RETRY_STATUSES = (429, 500, 502, 503, 504)
+SNAP_STORE_RETRY_BASE_S = 2
+
+# Snap channels are `<track>/<risk>[/<branch>]`; a missing track means the
+# snap's default track and a missing risk defaults to `stable`.
+SNAP_RISKS = ("stable", "candidate", "beta", "edge")
+DEFAULT_SNAP_CHANNEL = "stable"
+DEFAULT_TRACK = "latest"
+
+# Snap names and channel components are restricted to a small character set, so
+# an entry can never smuggle a path or query into the store URL.
+_SNAP_NAME_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")
+_SNAP_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
+
+ARCH_MAP = {
+    "x86_64": "amd64",
+    "aarch64": "arm64",
+    "armv7l": "armhf",
+    "ppc64le": "ppc64el",
+    "s390x": "s390x",
+}
+
+
+class SnapStoreError(RuntimeError):
+    """The Snap Store could not be queried, so a snap cannot be verified."""
+
+
+@dataclass(frozen=True)
+class SnapChannel:
+    """A parsed snap channel: an optional track, a risk and an optional branch."""
+
+    track: str | None
+    risk: str
+    branch: str | None
+
+
+@dataclass(frozen=True)
+class SnapRequest:
+    """One `snaps:` entry to check, plus the path it came from in the config."""
+
+    label: str
+    name: str
+    channel: str
+    classic: bool
+
+
+def parse_channel(channel: str) -> SnapChannel | None:
+    """Parse ``[track/]risk[/branch]``; return None when it is not a valid channel."""
+    parts = channel.split("/")
+    if len(parts) > 3:
+        return None
+    branch = None
+    if len(parts) == 3:
+        track, risk, branch = parts
+    elif len(parts) == 2:
+        track, risk = parts
+    else:
+        track, risk = None, parts[0]
+    if risk not in SNAP_RISKS:
+        return None
+    if track is not None and not _SNAP_COMPONENT_PATTERN.match(track):
+        return None
+    if branch is not None and not _SNAP_COMPONENT_PATTERN.match(branch):
+        return None
+    return SnapChannel(track, risk, branch)
+
+
+def channel_names(channel: SnapChannel, default_track: str | None) -> set[str]:
+    """Return the store channel names that satisfy a requested channel.
+
+    The store lists the default track both as ``<track>/<risk>`` and as a bare
+    ``<risk>`` alias, and a bare risk always means the default track (which is
+    not necessarily ``latest``).
+    """
+    default = default_track or DEFAULT_TRACK
+    if channel.track is None:
+        return {channel.risk, f"{default}/{channel.risk}"}
+    names = {f"{channel.track}/{channel.risk}"}
+    if channel.track == default:
+        names.add(channel.risk)
+    return names
+
+
+def _channel_map(info: dict[str, Any]) -> list[dict[str, Any]]:
+    channel_map = info.get("channel-map")
+    if not isinstance(channel_map, list):
+        raise SnapStoreError("the Snap Store response has no channel map")
+    return [entry for entry in channel_map if isinstance(entry, dict)]
+
+
+def _entry_name(entry: dict[str, Any]) -> str | None:
+    channel = entry.get("channel")
+    if not isinstance(channel, dict):
+        return None
+    name = channel.get("name")
+    return name if isinstance(name, str) else None
+
+
+def channel_entries(info: dict[str, Any], names: set[str]) -> list[dict[str, Any]]:
+    """Return the channel-map entries published under any of the given names."""
+    return [entry for entry in _channel_map(info) if _entry_name(entry) in names]
+
+
+def _default_track(info: dict[str, Any]) -> str | None:
+    default_track = info.get("default-track")
+    return default_track if isinstance(default_track, str) else None
+
+
+def fetch_snap_info(name: str) -> dict[str, Any] | None:
+    """Return the Snap Store metadata for a snap, or None when it does not exist.
+
+    This is the single entry point for Snap Store lookups, shared by the
+    installer-channel resolution and the ``snaps:`` validation.  Transient
+    failures (rate limiting, server errors, connection problems) are retried a
+    few times; anything still failing raises :class:`SnapStoreError` so callers
+    can decide whether to degrade or fail.
+    """
+    url = f"{SNAP_STORE_INFO_URL.format(name=name)}?fields={SNAP_STORE_FIELDS}"
+    request = urllib.request.Request(url, headers={"Snap-Device-Series": SNAP_STORE_SERIES})
+    last_error = "unknown error"
+    for attempt in range(1, SNAP_STORE_MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=SNAP_STORE_TIMEOUT_S) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            last_error = f"HTTP {exc.code}"
+            if exc.code in SNAP_STORE_RETRY_STATUSES and attempt < SNAP_STORE_MAX_ATTEMPTS:
+                time.sleep(SNAP_STORE_RETRY_BASE_S * attempt)
+                continue
+            break
+        except OSError as exc:
+            last_error = str(exc) or exc.__class__.__name__
+            if attempt < SNAP_STORE_MAX_ATTEMPTS:
+                time.sleep(SNAP_STORE_RETRY_BASE_S * attempt)
+                continue
+            break
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise SnapStoreError(f"the Snap Store returned an invalid response for {name!r}: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise SnapStoreError(f"the Snap Store returned an invalid response for {name!r}")
+        return data
+
+    raise SnapStoreError(f"could not query the Snap Store for {name!r} ({last_error})")
 
 
 def _get_snap_version_from_api(snap_name: str, channel: str) -> str | None:
     """Query the Snap Store API for the snap version without requiring an installed snapd."""
-    arch_map = {
-        "x86_64": "amd64",
-        "aarch64": "arm64",
-        "armv7l": "armhf",
-        "ppc64le": "ppc64el",
-        "s390x": "s390x",
-    }
-    target_arch = arch_map.get(platform.machine().lower(), "amd64")
-
-    url = f"https://api.snapcraft.io/v2/snaps/info/{snap_name}"
-    req = urllib.request.Request(url, headers={"Snap-Device-Series": "16"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            channel_entries = [e for e in data.get("channel-map", []) if e.get("channel", {}).get("name") == channel]
-            for entry in channel_entries:
-                if entry.get("channel", {}).get("architecture") == target_arch:
-                    return str(entry.get("version"))
-            if channel_entries:
-                return str(channel_entries[0].get("version"))
-    except Exception:
-        # Network errors, timeouts, or API schema changes fall back to local `snap info` (BLE001 accepted pattern).
+    parsed = parse_channel(channel)
+    if parsed is None:
         return None
+    target_arch = ARCH_MAP.get(platform.machine().lower(), "amd64")
+
+    try:
+        info = fetch_snap_info(snap_name)
+        if info is None:
+            return None
+        entries = channel_entries(info, channel_names(parsed, _default_track(info)))
+    except SnapStoreError:
+        # Network errors, timeouts, or API schema changes fall back to local `snap info`.
+        return None
+
+    for entry in entries:
+        if entry.get("channel", {}).get("architecture") == target_arch:
+            return str(entry.get("version"))
+    if entries:
+        return str(entries[0].get("version"))
     return None
 
 
@@ -46,7 +201,7 @@ def get_snap_version(channel: str) -> str:
     It first queries the public Snap Store API (works on any distribution
     without snapd) and falls back to the local `snap info` command if offline.
     """
-    if not channel or not CHANNEL_PATTERN.match(channel):
+    if parse_channel(channel) is None:
         raise SystemExit(
             f"ERROR: Invalid channel name '{channel}'. Expected format like 'latest/stable' or '24.04/edge'."
         )
@@ -78,6 +233,137 @@ def get_snap_version(channel: str) -> str:
         f"ERROR: Could not determine the snap version for channel '{channel}'. "
         f"Check the network connection or the channel name."
     )
+
+
+def _channel_confinement(entries: list[dict[str, Any]]) -> str | None:
+    """Return the confinement shared by every entry, or None when it is mixed/missing."""
+    consumed = {entry.get("confinement") for entry in entries if entry.get("confinement")}
+    return consumed.pop() if len(consumed) == 1 else None
+
+
+def is_valid_snap_name(name: str) -> bool:
+    """Return whether ``name`` is a syntactically valid snap name."""
+    return bool(_SNAP_NAME_PATTERN.match(name))
+
+
+def collect_snaps(entries: object) -> tuple[list[SnapRequest], list[str]]:
+    """Collect every `snaps:` entry to check and any structural errors.
+
+    ``entries`` is the raw value of ``autoinstall.snaps`` from the YAML file.
+    """
+    if entries is None:
+        return [], []
+    if not isinstance(entries, list):
+        return [], ["autoinstall.snaps must be a list"]
+
+    snaps: list[SnapRequest] = []
+    errors: list[str] = []
+    for index, entry in enumerate(entries):
+        prefix = f"snaps[{index}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{prefix} must be a mapping")
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            errors.append(f"{prefix}.name must be a non-empty string")
+            continue
+        if not is_valid_snap_name(name):
+            errors.append(f"{prefix}.name {name!r} is not a valid snap name")
+            continue
+        channel = entry.get("channel", DEFAULT_SNAP_CHANNEL)
+        if channel is None:
+            channel = DEFAULT_SNAP_CHANNEL
+        if not isinstance(channel, str):
+            errors.append(f"{prefix}.channel must be a string")
+            continue
+        if parse_channel(channel) is None:
+            errors.append(
+                f"{prefix}.channel {channel!r} is not a valid snap channel (expected e.g. 'stable' or '24.04/stable')"
+            )
+            continue
+        classic = entry.get("classic", False)
+        if classic is None:
+            classic = False
+        if not isinstance(classic, bool):
+            errors.append(f"{prefix}.classic must be a boolean")
+            continue
+        snaps.append(SnapRequest(prefix, name, channel, classic))
+    return snaps, errors
+
+
+def validate_snaps(entries: object) -> bool:
+    """Verify every `snaps:` entry against the Snap Store; return True when clean.
+
+    Checked per entry:
+    - the snap exists in the store,
+    - the requested channel is published,
+    - `classic` matches the confinement of that channel (classic snaps need
+      ``classic: true`` and strict snaps must not set it).
+    """
+    snaps, errors = collect_snaps(entries)
+    for error in errors:
+        print(f"[snaps] Structure error: {error}")
+
+    if not snaps:
+        if not errors:
+            print("[snaps] No snaps declared; nothing to check.")
+        return not errors
+
+    print(f"[snaps] Checking {len(snaps)} snap(s) against the Snap Store...")
+    cache: dict[str, dict[str, Any] | None] = {}
+    was_clean = not errors
+    for snap in snaps:
+        try:
+            if snap.name not in cache:
+                cache[snap.name] = fetch_snap_info(snap.name)
+            info = cache[snap.name]
+            if info is None:
+                print(f"[snaps] {snap.label}: snap {snap.name!r} does not exist in the Snap Store")
+                was_clean = False
+                continue
+
+            channel = parse_channel(snap.channel)
+            if channel is None:  # Unreachable: collect_snaps already rejected it.
+                was_clean = False
+                continue
+            entries = channel_entries(info, channel_names(channel, _default_track(info)))
+        except SnapStoreError as exc:
+            print(f"[snaps] {snap.label}: {exc}")
+            was_clean = False
+            continue
+
+        if not entries:
+            published = sorted({name for entry in _channel_map(info) if (name := _entry_name(entry))})
+            hint = f" (published channels: {', '.join(published)})" if published else ""
+            print(f"[snaps] {snap.label}: channel {snap.channel!r} is not published for snap {snap.name!r}{hint}")
+            was_clean = False
+            continue
+
+        if channel.branch is not None:
+            print(
+                f"[snaps] {snap.label}: branch {channel.branch!r} cannot be verified "
+                f"from the Snap Store channel map; checked the base channel {snap.channel!r}."
+            )
+
+        confinement = _channel_confinement(entries)
+        if confinement is None:
+            print(
+                f"[snaps] {snap.label}: confinement of {snap.name!r} on {snap.channel!r} "
+                f"is unknown; skipped the classic check."
+            )
+            continue
+        if confinement == "classic" and not snap.classic:
+            print(f"[snaps] {snap.label}: {snap.name!r} is a classic snap on {snap.channel!r}; set 'classic: true'")
+            was_clean = False
+        elif confinement != "classic" and snap.classic:
+            print(
+                f"[snaps] {snap.label}: {snap.name!r} is not a classic snap on {snap.channel!r} "
+                f"(confinement: {confinement}); remove 'classic: true'"
+            )
+            was_clean = False
+
+    print("[snaps] Snap declarations are valid." if was_clean else "[snaps] Snap validation failed.")
+    return was_clean
 
 
 def get_base_image(version: str) -> str:

@@ -1,0 +1,26 @@
+#cloud-config
+# Negative test case for the Snap Store validation layer.
+# The storage configuration is intentionally valid, so this file fails ONLY on
+# the snap checks. Do not use it as a reference configuration.
+autoinstall:
+  version: 1
+
+  refresh-installer:
+    update: true
+    channel: "26.04/stable"
+
+  storage:
+    layout:
+      name: direct
+
+  snaps:
+    # No snap with this name exists in the Snap Store.
+    - name: autoinstall-helper-nonexistent-snap
+
+    # The channel is not published for this snap.
+    - name: hello-world
+      channel: 99.99/stable
+
+    # `hello-world` is a strict snap, so requesting classic confinement fails.
+    - name: hello-world
+      classic: true

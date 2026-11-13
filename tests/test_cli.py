@@ -69,6 +69,78 @@ def test_validate_dispatch_default(monkeypatch, run, tmp_path):
     assert run("validate") == 0
 
 
+def test_validate_dispatch_snaps_scope(monkeypatch, run, tmp_path):
+    """The snap layer is selectable as its own validation scope."""
+    config = tmp_path / "autoinstall.yaml"
+    config.write_text("#cloud-config\n")
+    seen = {}
+    monkeypatch.setattr(cli, "validate", lambda cfg, validation, **kwargs: seen.update(validation=validation) or 0)
+
+    assert run("validate", str(config), "--validation", "snaps") == 0
+    assert seen == {"validation": "snaps"}
+
+
+class TestValidateEntrypoint:
+    """The host-side snap layer and its interaction with the Docker path."""
+
+    @staticmethod
+    def _config(tmp_path):
+        config = tmp_path / "autoinstall.yaml"
+        config.write_text(
+            "#cloud-config\n"
+            "autoinstall:\n"
+            "  version: 1\n"
+            "  refresh-installer:\n"
+            "    update: true\n"
+            "    channel: 24.04/stable\n",
+            encoding="utf-8",
+        )
+        return config
+
+    def test_snaps_scope_never_touches_docker(self, monkeypatch, tmp_path):
+        """--validation snaps resolves the layer on the host, without an image."""
+        config = self._config(tmp_path)
+        seen = {}
+
+        def fake_validate_snaps(entries):
+            seen["entries"] = entries
+            return True
+
+        monkeypatch.setattr(cli, "validate_snaps", fake_validate_snaps)
+        monkeypatch.setattr(cli, "get_snap_version", lambda channel: pytest.fail("channel resolution must not run"))
+        monkeypatch.setattr(cli, "docker_validate", lambda *a, **k: pytest.fail("Docker must not run"))
+        monkeypatch.setattr(cli, "docker_image_exists", lambda tag: pytest.fail("Docker must not run"))
+
+        assert cli.validate(config, validation="snaps") == 0
+        assert seen["entries"] == []
+
+    def test_snaps_scope_propagates_failure(self, monkeypatch, tmp_path):
+        config = self._config(tmp_path)
+        monkeypatch.setattr(cli, "validate_snaps", lambda entries: False)
+
+        assert cli.validate(config, validation="snaps") == 1
+
+    def test_full_reports_a_snap_failure_after_a_clean_docker_run(self, monkeypatch, tmp_path):
+        config = self._config(tmp_path)
+        monkeypatch.setattr(cli, "validate_snaps", lambda entries: False)
+        monkeypatch.setattr(cli, "get_snap_version", lambda channel: "1.0")
+        monkeypatch.setattr(cli, "docker_image_tag", lambda version: "validator:1")
+        monkeypatch.setattr(cli, "docker_image_exists", lambda tag: True)
+        monkeypatch.setattr(cli, "docker_validate", lambda *a, **k: 0)
+
+        assert cli.validate(config, validation="full") == 1
+
+    def test_full_passes_only_when_both_layers_pass(self, monkeypatch, tmp_path):
+        config = self._config(tmp_path)
+        monkeypatch.setattr(cli, "validate_snaps", lambda entries: True)
+        monkeypatch.setattr(cli, "get_snap_version", lambda channel: "1.0")
+        monkeypatch.setattr(cli, "docker_image_tag", lambda version: "validator:1")
+        monkeypatch.setattr(cli, "docker_image_exists", lambda tag: True)
+        monkeypatch.setattr(cli, "docker_validate", lambda *a, **k: 0)
+
+        assert cli.validate(config, validation="full") == 0
+
+
 def test_validate_doctor_dispatch(monkeypatch, run):
     """'validate doctor' runs the Docker preflight instead of the validator."""
     calls = {}

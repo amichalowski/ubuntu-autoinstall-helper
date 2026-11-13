@@ -52,6 +52,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
   - [Layer 4: Subiquity → Curtin Normalization](#4-subiquity--curtin-normalization-curtin_storage_input)
   - [Layer 5: Curtin Schema Validation](#5-curtin-schema-validation-curtin-schema-validate-subprocess)
   - [Layer 6: Shell Command Syntax Validation](#6-shell-command-syntax-validation-validate_shell_commands)
+  - [Host-Side Snap Store Validation](#host-side-snap-store-validation-snapstorevalidate_snaps)
   - [What the Validator Intentionally Avoids Checking Manually](#what-the-validator-intentionally-avoids-checking-manually)
 - [Erroneous Configuration Test Case (`wrong-autoinstall`)](#erroneous-configuration-test-case-wrong-autoinstall)
 
@@ -84,7 +85,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 │       ├── __main__.py                        # Module entry point (python -m autoinstall_helper)
 │       ├── cli.py                             # Main CLI implementation and command dispatch
 │       ├── config.py                          # autoinstall.yaml parsing & validation
-│       ├── snapstore.py                       # Snap Store API queries and base → Ubuntu image mapping
+│       ├── snapstore.py                       # Snap Store client: channel/version resolution, snap validation, base image mapping
 │       ├── docker_utils.py                    # Docker image management and docker/ asset extraction
 │       ├── flash.py                           # ISO flashing to block devices / image files
 │       ├── cidata.py                          # cidata (FAT32) partition injection & extraction
@@ -130,7 +131,7 @@ A comprehensive set of tools for creating, multi-layer validating, and installin
 
 - **Python 3.10+** (with `python3-yaml` or `PyYAML` package)
 - **uv** (recommended for local development and running tests)
-- **Docker** (required for `validate` command):
+- **Docker** (required for every `validate` scope except `--validation snaps`):
   - Membership in the `docker` group (`sudo usermod -aG docker $USER`, then log out and back in); no `sudo` is needed to run the tool
   - Run `autoinstall-helper validate doctor` to check the host
 - **System Utilities** (for disk operations: `flash`, `inject`, `extract`):
@@ -280,11 +281,16 @@ uv run autoinstall-helper validate path/to/your-autoinstall.yaml
 uv run autoinstall-helper validate wrong-autoinstall/autoinstall-wrong-storage.yaml
 
 # Choose validation scope:
-#   --validation full        (default: Subiquity dry-run + Curtin schema + shell commands)
+#   --validation full        (default: Subiquity dry-run + Curtin schema + shell commands + snaps)
 #   --validation autoinstall (Subiquity only)
 #   --validation storage     (storage only: structure pre-validation + Curtin schema)
 #   --validation commands    (shell syntax of early/late/error commands only)
+#   --validation snaps       (Snap Store existence, channel and classic confinement only)
 uv run autoinstall-helper validate wrong-autoinstall/autoinstall-wrong-storage.yaml --validation storage
+
+# Snap checks (host-side, no Docker): every `snaps:` entry must exist in the Snap
+# Store with a published channel, and `classic:` must match the snap's confinement.
+uv run autoinstall-helper validate autoinstall.yaml --validation snaps
 
 # Shell command checks: sh -n always runs, shellcheck is on by default.
 uv run autoinstall-helper validate autoinstall.yaml --validation commands
@@ -469,6 +475,14 @@ flowchart TD
 - **What it does:** Parses the shell syntax of every `early-commands`, `late-commands` and `error-commands` entry. Subiquity runs a string entry as `sh -c <command>` and a list entry directly as argv (`subiquity/server/controllers/cmdlist.py`), so string entries are checked with `sh -n` and list entries only for element types. Because the outer parse of `bash -c '...'` only sees a quoted word, the embedded payload is extracted and checked recursively with its own interpreter. shellcheck (severity `error` by default) runs as a complementary pass, catching classes `-n` misses — for example an unterminated here-document, which `sh -n` reports only as a warning.
 - **Why:** A syntax error in a late command surfaces at the very end of an installation, after the disk has already been partitioned and the system installed. Catching it before flashing saves a full reinstall cycle. The check is purely syntactic: commands are never executed and their runtime context (`curtin in-target`, installed binaries, `/target`) is not simulated.
 
+### Host-Side Snap Store Validation (`snapstore.validate_snaps`)
+- **What it does:** Runs on the host (`cli.validate`, no Docker) for `--validation snaps` and as part of `--validation full`. It extracts `autoinstall.snaps` from the YAML (`config.extract_snaps`) and queries the Snap Store for every entry, verifying that:
+  - the snap exists under the requested name,
+  - the requested channel (`[track/]risk[/branch]`) is published for that snap (a bare risk means the snap's default track; branches are syntax-checked, but the store's channel map only exposes the base channel),
+  - `classic:` matches the confinement of that channel — classic snaps require `classic: true`, strict snaps must not set it.
+- **Why:** A typo in a snap name or channel is only detected when the installer reaches the snap phase, i.e. after partitioning and the base system install. An incorrect `classic` flag fails with an opaque snapd error for exactly the same reason. Structural problems (missing or malformed `name`, `channel`, `classic`) are reported without contacting the store, and a persistent store failure fails validation instead of silently skipping the snap.
+- **Why on the host:** the check is pure YAML + network, so it needs neither Subiquity/Curtin nor the validator image. `--validation snaps` therefore runs in milliseconds and works even when Docker is unavailable. It shares the single Snap Store client (`snapstore.fetch_snap_info` plus channel parsing and default-track resolution) with the installer-channel resolution used to pick the validator image, so both paths agree on how channels are interpreted; store failures that only need a fallback (version lookup) degrade, while validation failures are reported.
+
 ### What the Validator Intentionally Avoids Checking Manually
 
 Subiquity deliberately **ignores unknown action types and unrecognized fields** to maintain forward and backward compatibility. The `curtin schema-validate` layer catches these anomalies after normalization. Our codebase does not hardcode rigid lists of allowed values, making it resilient to Ubuntu package updates.
@@ -492,3 +506,5 @@ The file located at [`wrong-autoinstall/autoinstall-wrong-storage.yaml`](wrong-a
 - **Reminder:** This file is preserved exclusively as a test case to verify that the validator correctly catches invalid storage definitions. **Do not use it as a reference for production installations.**
 
 A second negative fixture, [`wrong-autoinstall/autoinstall-broken-commands.yaml`](wrong-autoinstall/autoinstall-broken-commands.yaml), isolates the command layer: its storage configuration is valid, but its commands contain a missing `done`, an unterminated here-document, a broken payload inside `bash -c '...'` and a non-string element in an argv-style entry. It proves that `--validation commands` catches what the Subiquity and Curtin layers never look at.
+
+A third negative fixture, [`wrong-autoinstall/autoinstall-broken-snaps.yaml`](wrong-autoinstall/autoinstall-broken-snaps.yaml), isolates the snap layer: it declares a snap that does not exist, a channel that is not published and a strict snap that requests `classic: true`. It proves that `--validation snaps` catches mistakes that only surface when the installer reaches the snap phase.

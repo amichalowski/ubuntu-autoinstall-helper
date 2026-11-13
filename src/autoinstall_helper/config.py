@@ -16,6 +16,22 @@ def extract_installer_channel(config_file: Path) -> str:
     return str(channel).strip()
 
 
+def extract_snaps(config_file: Path) -> object:
+    """Extract the raw autoinstall.snaps value from the YAML file ([] when absent).
+
+    The value is returned unvalidated so the snap layer can report structural
+    problems itself instead of failing with a bare parse error.
+    """
+    # Lazy import: see extract_installer_channel.
+    import yaml  # type: ignore[import-untyped]
+
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    autoinstall = data.get("autoinstall") if isinstance(data, dict) else None
+    if not isinstance(autoinstall, dict):
+        return []
+    return autoinstall.get("snaps", [])
+
+
 def has_cloud_config_header(config_file: Path) -> bool:
     """Check whether the file starts with '#cloud-config'."""
     try:

@@ -5,7 +5,9 @@ Available commands:
   - validate: reads the channel from autoinstall.yaml, resolves the version
     via `snap info`, builds the Docker image (if missing) and runs the
     Subiquity/Curtin validator plus the shell-syntax check of the
-    early/late/error commands inside the container. `validate doctor` checks the
+    early/late/error commands inside the container. The `snaps:` section is
+    checked against the Snap Store on the host (no Docker needed for
+    `--validation snaps`). `validate doctor` checks the
     Docker host instead (binary present, daemon reachable, no sudo needed) and
     `validate images` lists or prunes the locally built validator images.
   - flash: writes an ISO image to the target (block device or file),
@@ -35,7 +37,7 @@ from pathlib import Path
 
 from autoinstall_helper import fsprobe, vm
 from autoinstall_helper.cidata import extract, inject
-from autoinstall_helper.config import extract_installer_channel, require_cloud_config_header
+from autoinstall_helper.config import extract_installer_channel, extract_snaps, require_cloud_config_header
 from autoinstall_helper.disk import is_block_device
 from autoinstall_helper.docker_utils import (
     SHELLCHECK_SEVERITIES,
@@ -48,7 +50,7 @@ from autoinstall_helper.docker_utils import (
     get_docker_dir,
 )
 from autoinstall_helper.flash import flash
-from autoinstall_helper.snapstore import get_base_image, get_snap_version
+from autoinstall_helper.snapstore import get_base_image, get_snap_version, validate_snaps
 
 # The positional CONFIG slot of `validate` doubles as an action name, so these
 # words are reserved (a configuration file literally named like one of them is
@@ -74,12 +76,21 @@ def validate(
     shellcheck: bool = True,
     shellcheck_severity: str = "error",
 ) -> int:
-    """Validate autoinstall.yaml against Subiquity and Curtin in a Docker container."""
+    """Validate autoinstall.yaml against Subiquity, Curtin, the Snap Store and shell syntax."""
     if not fsprobe.probe(config_file).exists:
         raise SystemExit(f"ERROR: File does not exist: {config_file}")
 
     print(f"[autoinstall-helper] Reading: {config_file}")
     require_cloud_config_header(config_file)
+
+    # The snap layer needs only the YAML and the Snap Store, so it runs on the
+    # host and `--validation snaps` never builds or starts the Docker image.
+    snaps_clean = True
+    if validation in ("snaps", "full"):
+        snaps_clean = validate_snaps(extract_snaps(config_file))
+    if validation == "snaps":
+        return 0 if snaps_clean else 1
+
     channel = extract_installer_channel(config_file)
     print(f"[autoinstall-helper] Installer channel: {channel}")
 
@@ -104,6 +115,9 @@ def validate(
         shellcheck=shellcheck,
         shellcheck_severity=shellcheck_severity,
     )
+    if rc == 0 and not snaps_clean:
+        print("[autoinstall-helper] Validation failed: the snaps layer reported errors.", file=sys.stderr)
+        return 1
     if rc == 0:
         print("[autoinstall-helper] Validation completed successfully!")
     else:
@@ -145,11 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_val.add_argument(
         "--validation",
-        choices=("autoinstall", "storage", "commands", "full"),
+        choices=("autoinstall", "storage", "commands", "snaps", "full"),
         default="full",
         help=(
             "Validation scope: autoinstall (Subiquity), storage (storage actions + "
             "Curtin schema), commands (shell syntax of early/late/error commands), "
+            "snaps (host-side Snap Store existence, channel and classic confinement), "
             "full (all checks; default)"
         ),
     )

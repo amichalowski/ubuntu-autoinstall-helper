@@ -6,6 +6,7 @@ import pytest
 
 from autoinstall_helper.config import (
     extract_installer_channel,
+    extract_snaps,
     has_cloud_config_header,
     require_cloud_config_header,
 )
@@ -124,3 +125,40 @@ autoinstall:
         with pytest.raises(SystemExit) as exc_info:
             extract_installer_channel(cfg)
         assert "Field 'autoinstall.refresh-installer.channel' not found" in str(exc_info.value)
+
+
+class TestExtractSnaps:
+    """Tests for extract_snaps(config_file)."""
+
+    def test_returns_the_raw_snaps_list(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text(
+            """
+autoinstall:
+  snaps:
+    - name: hello-world
+    - name: code
+      channel: 24.04/stable
+      classic: true
+""",
+            encoding="utf-8",
+        )
+        assert extract_snaps(cfg) == [
+            {"name": "hello-world"},
+            {"name": "code", "channel": "24.04/stable", "classic": True},
+        ]
+
+    def test_missing_snaps_section_returns_empty_list(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text("autoinstall:\n  version: 1\n", encoding="utf-8")
+        assert extract_snaps(cfg) == []
+
+    def test_missing_autoinstall_key_returns_empty_list(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text("other_key: 123\n", encoding="utf-8")
+        assert extract_snaps(cfg) == []
+
+    def test_non_mapping_snaps_value_is_returned_unvalidated(self, tmp_path: Path):
+        cfg = tmp_path / "autoinstall.yaml"
+        cfg.write_text("autoinstall:\n  snaps: hello-world\n", encoding="utf-8")
+        assert extract_snaps(cfg) == "hello-world"

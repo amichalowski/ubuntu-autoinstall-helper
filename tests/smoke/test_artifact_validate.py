@@ -24,6 +24,7 @@ pytestmark = pytest.mark.smoke
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WRONG_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-wrong-storage.yaml"
 BROKEN_COMMANDS_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-broken-commands.yaml"
+BROKEN_SNAPS_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-broken-snaps.yaml"
 VALIDATOR_REPO = "ubuntu-desktop-bootstrap"
 
 # Commands that do not build or run a container finish quickly.
@@ -145,6 +146,41 @@ def test_commands_scope_accepts_valid_commands(run_artifact, tmp_path):
     output = _output(proc)
     assert proc.returncode == 0, output
     assert "[commands] Shell command syntax is valid." in output, output
+
+
+def test_snaps_scope_rejects_broken_snaps(run_artifact):
+    """--validation snaps must catch bad names, channels and classic flags."""
+    proc = run_artifact("validate", str(BROKEN_SNAPS_CONFIG), "--validation", "snaps")
+
+    output = _output(proc)
+    assert proc.returncode != 0, output
+    assert "[snaps] Checking 3 snap(s)" in output, output
+    assert "does not exist in the Snap Store" in output, output
+    assert "is not published for snap 'hello-world'" in output, output
+    assert "is not a classic snap on 'stable'" in output, output
+    assert "[snaps] Snap validation failed." in output, output
+
+
+def test_snaps_scope_accepts_a_valid_snap(run_artifact, tmp_path):
+    """A real strict snap without the classic flag must pass the snaps scope."""
+    config = tmp_path / "valid-snaps.yaml"
+    config.write_text(
+        "#cloud-config\n"
+        "autoinstall:\n"
+        "  version: 1\n"
+        "  refresh-installer:\n"
+        "    update: true\n"
+        '    channel: "26.04/stable"\n'
+        "  snaps:\n"
+        "    - name: hello-world\n",
+        encoding="utf-8",
+    )
+
+    proc = run_artifact("validate", str(config), "--validation", "snaps")
+
+    output = _output(proc)
+    assert proc.returncode == 0, output
+    assert "[snaps] Snap declarations are valid." in output, output
 
 
 def test_validate_reuses_cached_docker_image(run_artifact):
