@@ -9,4 +9,5 @@ dist/
 *.egg-info/
 .pytest_cache/
 DOCKER_DIGEST
+autoinstall.yaml
 
