@@ -18,7 +18,9 @@ repos:
         name: ruff format
         entry: uv run ruff format --force-exclude
         language: system
-        types: [python]
+        # Markdown is included so that Python code blocks in docs are formatted
+        # by the hook as well (the linter only handles Python files).
+        types_or: [python, pyi, markdown]
       # Enforce Conventional Commits (https://www.conventionalcommits.org/) so every
       # commit message maps to a parser in cliff.toml. Allowed types mirror cliff.toml.
       - id: conventional-pre-commit
