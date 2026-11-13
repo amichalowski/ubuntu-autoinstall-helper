@@ -40,7 +40,7 @@ VM_MARKER_PREFIX = "autoinstall-helper:"
 # by this tool and keep them apart from arbitrary libvirt domains.
 TOOL_NAME = "autoinstall-helper"
 
-DEFAULT_DISK_SIZE_GIB = 40
+DEFAULT_DISK_SIZE_GIB = 15
 DEFAULT_MEMORY_MB = 4096
 DEFAULT_VCPUS = 4
 DEFAULT_OS_VARIANT = "ubuntu24.04"

@@ -384,7 +384,7 @@ uv run autoinstall-helper vm status test-vm
 | --- | --- | --- |
 | `--media IMG` | *(required)* | Installation image attached as a removable USB disk |
 | `--disk PATH` | — | Reuse an existing target disk image instead of allocating one |
-| `--disk-size GiB` | `40` | Size of the allocated target disk |
+| `--disk-size GiB` | `15` | Size of the allocated target disk |
 | `--memory MB` / `--vcpus N` | `4096` / `4` | VM resources |
 | `--firmware uefi\|bios` | `uefi` | Firmware type |
 | `--no-tpm` | TPM 2.0 on | Add/omit the emulated TPM 2.0 device |

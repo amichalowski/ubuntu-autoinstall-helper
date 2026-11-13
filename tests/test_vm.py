@@ -163,7 +163,7 @@ class TestBuildVirtInstallCommand:
         cmd = vm.build_virt_install_command(vm.VmSpec(name="test-vm", media=Path("/tmp/pendrive.img")))
         assert cmd[0] == "virt-install"
         assert "--noautoconsole" in cmd
-        assert cmd[cmd.index("--disk") + 1] == "size=40,bus=virtio"
+        assert cmd[cmd.index("--disk") + 1] == "size=15,bus=virtio"
         assert "path=/tmp/pendrive.img,bus=usb,removable=on" in cmd
         assert cmd[cmd.index("--boot") + 1] == "uefi"
         assert cmd[cmd.index("--network") + 1] == "network=default"
@@ -736,7 +736,7 @@ class TestDetectVirtType:
 
 def test_vm_spec_defaults_match_the_documented_values():
     spec = vm.VmSpec(name="vm", media=Path("media.img"))
-    assert (spec.disk_size_gib, spec.memory_mb, spec.vcpus) == (40, 4096, 4)
+    assert (spec.disk_size_gib, spec.memory_mb, spec.vcpus) == (15, 4096, 4)
     assert spec.firmware == "uefi"
     assert spec.graphics == "spice"
     assert spec.tpm is True
