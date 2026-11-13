@@ -18,6 +18,9 @@ DOCKER_IMAGE_REPO = "ubuntu-desktop-bootstrap"
 # Fields of `docker image ls --format` used to describe a validator image.
 DOCKER_IMAGE_FIELDS = ("Repository", "Tag", "ID", "CreatedSince", "Size")
 
+# Must stay in sync with SHELLCHECK_SEVERITIES in docker/validate-autoinstall.py.
+SHELLCHECK_SEVERITIES = ("error", "warning", "info", "style")
+
 # Validator assets hashed into the image tag; order is significant and must stay stable.
 DOCKER_ASSET_FILES = ("Dockerfile", "timedatectl.sh", "validate-autoinstall.py")
 
@@ -165,7 +168,14 @@ def docker_build(tag: str, version: str, base_image: str, dockerfile: Path) -> N
     print(f"[autoinstall-helper] Image '{tag}' built.")
 
 
-def docker_validate(tag: str, config_file: Path, validation: str) -> int:
+def docker_validate(
+    tag: str,
+    config_file: Path,
+    validation: str,
+    *,
+    shellcheck: bool = True,
+    shellcheck_severity: str = "error",
+) -> int:
     """Run validation inside the Docker container and return the exit code."""
     container_path = "/data/autoinstall.yaml"
     cmd = [
@@ -180,7 +190,11 @@ def docker_validate(tag: str, config_file: Path, validation: str) -> int:
         container_path,
         "--validation",
         validation,
+        "--shellcheck-severity",
+        shellcheck_severity,
     ]
+    if not shellcheck:
+        cmd.append("--no-shellcheck")
     print(f"[autoinstall-helper] Validating '{config_file.name}' in container '{tag}'...")
     result = subprocess.run(cmd, check=False)
     return result.returncode

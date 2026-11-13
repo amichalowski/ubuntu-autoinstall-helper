@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-systemd \
     python3-urwid \
     python3-yaml \
+    shellcheck \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 

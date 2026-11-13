@@ -146,6 +146,52 @@ class TestDockerGroupMembership:
         assert docker_utils._docker_group_membership() is False
 
 
+class TestDockerValidate:
+    """`validate` command line handed to the validator container."""
+
+    def test_default_argv(self, monkeypatch, tmp_path):
+        stub = install_stub(monkeypatch, DockerStub())
+        config = tmp_path / "autoinstall.yaml"
+
+        assert docker_utils.docker_validate("validator:1", config, "full") == 0
+
+        assert stub.calls[0] == [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{config.resolve()}:/data/autoinstall.yaml:ro",
+            "validator:1",
+            "python3",
+            "scripts/validate-autoinstall.py",
+            "/data/autoinstall.yaml",
+            "--validation",
+            "full",
+            "--shellcheck-severity",
+            "error",
+        ]
+
+    def test_shellcheck_options_are_forwarded(self, monkeypatch, tmp_path):
+        stub = install_stub(monkeypatch, DockerStub(rm_rc=1))
+        config = tmp_path / "autoinstall.yaml"
+
+        assert (
+            docker_utils.docker_validate(
+                "validator:1",
+                config,
+                "commands",
+                shellcheck=False,
+                shellcheck_severity="warning",
+            )
+            == 1
+        )
+
+        cmd = stub.calls[0]
+        assert cmd[-1] == "--no-shellcheck"
+        assert cmd[cmd.index("--shellcheck-severity") + 1] == "warning"
+        assert cmd[cmd.index("--validation") + 1] == "commands"
+
+
 class TestListValidatorImages:
     """Parsing of `docker image ls --format` output."""
 

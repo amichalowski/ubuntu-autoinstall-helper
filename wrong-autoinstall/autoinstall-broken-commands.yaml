@@ -1,0 +1,32 @@
+#cloud-config
+# Negative test case for the shell-command validation layer.
+# The storage configuration is intentionally valid, so this file fails ONLY on
+# the command syntax checks. Do not use it as a reference configuration.
+autoinstall:
+  version: 1
+
+  refresh-installer:
+    update: true
+    channel: "24.04/stable"
+
+  storage:
+    layout:
+      name: direct
+
+  early-commands:
+    # Missing `done`: reported by `sh -n`.
+    - |
+      for disk in /dev/sd?; do
+        echo "probing $disk"
+
+  late-commands:
+    # Unterminated here-document: `sh -n` only warns, shellcheck reports an error.
+    - |
+      cat << EOF > /etc/motd
+      hello
+
+  error-commands:
+    # Broken payload inside `bash -c`: only the nested extraction can see it.
+    - bash -c 'for i in 1 2 3; do echo "$i"'
+    # A list entry is executed as argv (no shell), so it must contain strings only.
+    - ["curtin", "in-target", "--", true]

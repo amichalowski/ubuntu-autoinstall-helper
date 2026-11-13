@@ -34,16 +34,38 @@ def test_validate_dispatch(monkeypatch, run, tmp_path):
     config.write_text("#cloud-config\n")
     seen = {}
 
-    monkeypatch.setattr(cli, "validate", lambda cfg, validation: seen.update(cfg=cfg, validation=validation) or 0)
+    def fake_validate(cfg, validation, **kwargs):
+        seen.update(cfg=cfg, validation=validation, **kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "validate", fake_validate)
 
     rc = run("validate", str(config), "--validation", "storage")
     assert rc == 0
-    assert seen == {"cfg": config, "validation": "storage"}
+    assert seen == {"cfg": config, "validation": "storage", "shellcheck": True, "shellcheck_severity": "error"}
+
+
+def test_validate_dispatch_forwards_shellcheck_options(monkeypatch, run, tmp_path):
+    config = tmp_path / "autoinstall.yaml"
+    config.write_text("#cloud-config\n")
+    seen = {}
+
+    def fake_validate(cfg, validation, **kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "validate", fake_validate)
+
+    assert run("validate", str(config), "--validation", "commands", "--no-shellcheck") == 0
+    assert seen == {"shellcheck": False, "shellcheck_severity": "error"}
+
+    assert run("validate", str(config), "--shellcheck-severity", "warning") == 0
+    assert seen == {"shellcheck": True, "shellcheck_severity": "warning"}
 
 
 def test_validate_dispatch_default(monkeypatch, run, tmp_path):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "validate", lambda cfg, validation: 0)
+    monkeypatch.setattr(cli, "validate", lambda cfg, validation, **kwargs: 0)
     assert run("validate") == 0
 
 
@@ -330,7 +352,7 @@ def test_build_parser_has_all_commands():
 
 def test_main_with_explicit_argv(monkeypatch):
     called = {}
-    monkeypatch.setattr(cli, "validate", lambda cfg, validation: called.update(called=True) or 0)
+    monkeypatch.setattr(cli, "validate", lambda cfg, validation, **kwargs: called.update(called=True) or 0)
     rc = cli.main(["validate", "my_autoinstall.yaml"])
     assert rc == 0
     assert called == {"called": True}

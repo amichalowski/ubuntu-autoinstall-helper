@@ -23,6 +23,7 @@ pytestmark = pytest.mark.smoke
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WRONG_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-wrong-storage.yaml"
+BROKEN_COMMANDS_CONFIG = REPO_ROOT / "wrong-autoinstall" / "autoinstall-broken-commands.yaml"
 VALIDATOR_REPO = "ubuntu-desktop-bootstrap"
 
 # Commands that do not build or run a container finish quickly.
@@ -106,6 +107,44 @@ def test_autoinstall_scope_runs_subiquity_only(run_artifact):
     output = _output(proc)
     assert "[autoinstall] Running Subiquity dry-run validation" in output, output
     assert "[storage] Running Curtin schema validation" not in output, output
+
+
+def test_commands_scope_rejects_broken_commands(run_artifact):
+    """--validation commands must catch shell syntax errors the other layers ignore."""
+    proc = run_artifact("validate", str(BROKEN_COMMANDS_CONFIG), "--validation", "commands")
+
+    output = _output(proc)
+    assert proc.returncode != 0, output
+    assert "[commands] Checking" in output, output
+    assert "sh -n found a syntax error" in output, output
+    # The payload inside `bash -c '...'` is a quoted word to the outer parse.
+    assert "bash -c (depth 1)" in output, output
+    # An unterminated here-document only shellcheck reports (sh -n just warns).
+    assert "shellcheck (error) reported" in output, output
+    assert "[commands] Shell command validation failed." in output, output
+
+
+def test_commands_scope_accepts_valid_commands(run_artifact, tmp_path):
+    """A valid command list must pass the commands scope."""
+    config = tmp_path / "valid-commands.yaml"
+    config.write_text(
+        "#cloud-config\n"
+        "autoinstall:\n"
+        "  version: 1\n"
+        "  refresh-installer:\n"
+        "    update: true\n"
+        '    channel: "24.04/stable"\n'
+        "  late-commands:\n"
+        "    - curtin in-target -- true\n"
+        "    - bash -c 'echo hi'\n",
+        encoding="utf-8",
+    )
+
+    proc = run_artifact("validate", str(config), "--validation", "commands")
+
+    output = _output(proc)
+    assert proc.returncode == 0, output
+    assert "[commands] Shell command syntax is valid." in output, output
 
 
 def test_validate_reuses_cached_docker_image(run_artifact):

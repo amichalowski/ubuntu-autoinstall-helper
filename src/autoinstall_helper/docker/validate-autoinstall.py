@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Run Subiquity autoinstall and Curtin storage validation."""
+"""Run Subiquity autoinstall, Curtin storage and shell command validation."""
 
 import argparse
 import asyncio
 import copy
 import importlib.util
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,25 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 CURTIN_ROOT = ROOT / "curtin"
 SUBIQUITY_VALIDATOR_PATH = Path(__file__).with_name("validate-autoinstall-user-data.py")
+
+# Autoinstall keys holding shell commands, in execution order.
+COMMAND_SECTIONS = ("early-commands", "late-commands", "error-commands")
+
+# Subiquity executes a string command as `["sh", "-c", command]`
+# (subiquity/server/controllers/cmdlist.py) and a list command directly as
+# argv, without a shell.  Only the string form is parsed by a shell, so that is
+# the dialect the syntax check must use.
+COMMAND_INTERPRETER = "sh"
+
+# Kept in sync with SHELLCHECK_SEVERITIES in autoinstall_helper/docker_utils.py.
+SHELLCHECK_SEVERITIES = ("error", "warning", "info", "style")
+
+# Interpreters whose `-c` argument is a shell script we can check on its own.
+_SHELL_INTERPRETERS = ("bash", "sh")
+
+# Depth limit for the recursive `-c` extraction; real configurations never nest
+# deeply, and the bound keeps a pathological input from looping forever.
+_NESTED_MAX_DEPTH = 4
 
 
 def load_subiquity_validator():
@@ -126,8 +148,174 @@ def curtin_storage_input(ai_data: dict[str, Any]) -> dict[str, Any] | None:
     return {"storage": {"version": 1, "config": actions}}
 
 
-async def validate(ai_data: dict[str, Any], mode: str, verbosity: int, validator) -> int:
+@dataclass(frozen=True)
+class ShellCommand:
+    """One shell snippet to check, plus the path it came from in the config."""
+
+    label: str
+    interpreter: str
+    script: str
+
+
+def _shell_words(command: str) -> list[str]:
+    """Split a command the way the outer POSIX shell would (quote removal included).
+
+    ``shlex`` models exactly what matters here: adjacent quoted and unquoted
+    fragments concatenate into a single argument, and a failing split (unbalanced
+    quotes) is reported to the caller.
+    """
+    lexer = shlex.shlex(command, posix=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
+def nested_shell_scripts(script: str, depth: int = 1) -> list[tuple[str, str, int]]:
+    """Return the ``(interpreter, script, depth)`` payloads embedded via ``-c``.
+
+    ``sh -n`` and shellcheck only parse the outer command; the script passed to
+    ``bash -c '...'`` is a single argument to them, so a syntax error inside it
+    stays invisible unless it is extracted and checked separately.  The argument
+    is taken from a real POSIX word split (not a quote-boundary heuristic), so a
+    payload assembled from several quoted fragments is reassembled correctly.
+    """
+    found: list[tuple[str, str, int]] = []
+    try:
+        words = _shell_words(script)
+    except ValueError:
+        # Unbalanced quotes are the outer `sh -n` / `bash -n` check's job.
+        return found
+    for index, word in enumerate(words):
+        if word != "-c" or index == 0 or index + 1 >= len(words):
+            continue
+        interpreter = words[index - 1].rpartition("/")[2]
+        if interpreter not in _SHELL_INTERPRETERS:
+            continue
+        payload = words[index + 1]
+        found.append((interpreter, payload, depth))
+        if depth < _NESTED_MAX_DEPTH:
+            found.extend(nested_shell_scripts(payload, depth + 1))
+    return found
+
+
+def collect_shell_commands(ai_data: dict[str, Any]) -> tuple[list[ShellCommand], list[str]]:
+    """Collect every shell snippet to check and any structural errors.
+
+    String entries are executed as ``sh -c`` and get both the outer snippet and
+    every nested ``-c`` payload.  List entries are executed directly as argv
+    (no shell), so only the element types are validated.
+    """
+    commands: list[ShellCommand] = []
+    errors: list[str] = []
+    for section in COMMAND_SECTIONS:
+        entries = ai_data.get(section)
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            errors.append(f"autoinstall.{section} must be a list")
+            continue
+        for index, entry in enumerate(entries):
+            prefix = f"{section}[{index}]"
+            if isinstance(entry, list):
+                invalid = [i for i, item in enumerate(entry) if not isinstance(item, str)]
+                if invalid:
+                    errors.append(f"{prefix} argv entry must contain only strings (non-string items: {invalid})")
+                continue
+            if not isinstance(entry, str):
+                errors.append(f"{prefix} must be a string or a list of strings")
+                continue
+            commands.append(ShellCommand(prefix, COMMAND_INTERPRETER, entry))
+            for interpreter, payload, depth in nested_shell_scripts(entry):
+                commands.append(ShellCommand(f"{prefix} → {interpreter} -c (depth {depth})", interpreter, payload))
+    return commands, errors
+
+
+def _print_diagnostics(text: str) -> None:
+    """Print a tool's output indented under the command it belongs to."""
+    for line in text.splitlines():
+        if line.strip():
+            print(f"    {line}", file=sys.stderr)
+
+
+def _run_shell(command: ShellCommand, argv: list[str]) -> subprocess.CompletedProcess:
+    """Run one checker on the snippet, feeding the script on stdin."""
+    return subprocess.run(argv, input=command.script, text=True, capture_output=True, check=False)
+
+
+def check_shell_syntax(command: ShellCommand) -> bool:
+    """Run ``sh -n`` / ``bash -n`` on one snippet; report diagnostics on failure."""
+    result = _run_shell(command, [command.interpreter, "-n"])
+    if result.returncode == 0:
+        return True
+    print(f"[commands] {command.label}: {command.interpreter} -n found a syntax error", file=sys.stderr)
+    _print_diagnostics(result.stderr)
+    return False
+
+
+def run_shellcheck(command: ShellCommand, severity: str) -> bool:
+    """Run shellcheck on one snippet; report findings at or above ``severity``."""
+    result = _run_shell(
+        command,
+        ["shellcheck", "--shell", command.interpreter, "--severity", severity, "--format", "gcc", "-"],
+    )
+    if result.returncode == 0:
+        return True
+    print(f"[commands] {command.label}: shellcheck ({severity}) reported:", file=sys.stderr)
+    _print_diagnostics(result.stdout)
+    return False
+
+
+def validate_shell_commands(ai_data: dict[str, Any], *, use_shellcheck: bool = True, severity: str = "error") -> bool:
+    """Check the syntax of every early/late/error command; return True when clean.
+
+    This is a pure syntax check: commands are never executed and their runtime
+    context (``curtin in-target``, installed binaries, ``/target``) is not
+    simulated, so only parsing mistakes are reported.
+    """
+    commands, errors = collect_shell_commands(ai_data)
+    for error in errors:
+        print(f"[commands] Structure error: {error}", file=sys.stderr)
+
+    shellcheck_available = shutil.which("shellcheck") is not None
+    if use_shellcheck and not shellcheck_available:
+        print("[commands] shellcheck not found; running syntax checks only.", file=sys.stderr)
+
+    print(f"[commands] Checking {len(commands)} command(s) in {', '.join(COMMAND_SECTIONS)}...")
+    was_clean = not errors
+    for command in commands:
+        if not check_shell_syntax(command):
+            was_clean = False
+        if use_shellcheck and shellcheck_available and not run_shellcheck(command, severity):
+            was_clean = False
+
+    print("[commands] Shell command syntax is valid." if was_clean else "[commands] Shell command validation failed.")
+    return was_clean
+
+
+async def validate(
+    ai_data: dict[str, Any],
+    mode: str,
+    verbosity: int,
+    validator,
+    *,
+    use_shellcheck: bool = True,
+    shellcheck_severity: str = "error",
+) -> int:
     check_storage = mode in ("storage", "full")
+    check_commands = mode in ("commands", "full")
+
+    # The command layer is independent of Subiquity/Curtin, so it is the only
+    # check run for `--validation commands`.
+    if mode == "commands":
+        clean = validate_shell_commands(ai_data, use_shellcheck=use_shellcheck, severity=shellcheck_severity)
+        return 0 if clean else 1
+
+    commands_clean = (
+        validate_shell_commands(ai_data, use_shellcheck=use_shellcheck, severity=shellcheck_severity)
+        if check_commands
+        else True
+    )
+
     structural_errors = validate_storage_structure(ai_data) if check_storage else []
 
     for error in structural_errors:
@@ -146,6 +334,8 @@ async def validate(ai_data: dict[str, Any], mode: str, verbosity: int, validator
         )
 
         if subiquity_result != 0:
+            return 1
+        if not commands_clean:
             return 1
         if not check_storage:
             return 0
@@ -194,9 +384,22 @@ def parse_args():
     parser.add_argument("input", nargs="?", type=argparse.FileType("r"), default="-")
     parser.add_argument(
         "--validation",
-        choices=("autoinstall", "storage", "full"),
+        choices=("autoinstall", "storage", "commands", "full"),
         default="full",
         help="Validation scope (default: full)",
+    )
+    parser.add_argument(
+        "--no-shellcheck",
+        dest="shellcheck",
+        action="store_false",
+        default=True,
+        help="Skip shellcheck (the sh -n / bash -n syntax check always runs)",
+    )
+    parser.add_argument(
+        "--shellcheck-severity",
+        choices=SHELLCHECK_SEVERITIES,
+        default="error",
+        help="Minimum shellcheck severity that fails validation (default: error)",
     )
     parser.add_argument(
         "--no-expect-cloudconfig",
@@ -223,7 +426,16 @@ def main() -> int:
     try:
         # Note: asyncio.run is required because Subiquity's validator API
         # (make_app and verify_autoinstall) consists of async coroutines.
-        return asyncio.run(validate(ai_data, args.validation, args.verbosity, validator))
+        return asyncio.run(
+            validate(
+                ai_data,
+                args.validation,
+                args.verbosity,
+                validator,
+                use_shellcheck=args.shellcheck,
+                shellcheck_severity=args.shellcheck_severity,
+            )
+        )
     except Exception as exc:
         print(f"Validation failed: {exc}", file=sys.stderr)
         return 1

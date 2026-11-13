@@ -4,7 +4,8 @@
 Available commands:
   - validate: reads the channel from autoinstall.yaml, resolves the version
     via `snap info`, builds the Docker image (if missing) and runs the
-    Subiquity validator inside the container. `validate doctor` checks the
+    Subiquity/Curtin validator plus the shell-syntax check of the
+    early/late/error commands inside the container. `validate doctor` checks the
     Docker host instead (binary present, daemon reachable, no sudo needed) and
     `validate images` lists or prunes the locally built validator images.
   - flash: writes an ISO image to the target (block device or file),
@@ -37,6 +38,7 @@ from autoinstall_helper.cidata import extract, inject
 from autoinstall_helper.config import extract_installer_channel, require_cloud_config_header
 from autoinstall_helper.disk import is_block_device
 from autoinstall_helper.docker_utils import (
+    SHELLCHECK_SEVERITIES,
     docker_build,
     docker_doctor,
     docker_image_exists,
@@ -65,7 +67,13 @@ def _require_root(action: str) -> None:
         )
 
 
-def validate(config_file: Path, validation: str = "full") -> int:
+def validate(
+    config_file: Path,
+    validation: str = "full",
+    *,
+    shellcheck: bool = True,
+    shellcheck_severity: str = "error",
+) -> int:
     """Validate autoinstall.yaml against Subiquity and Curtin in a Docker container."""
     if not fsprobe.probe(config_file).exists:
         raise SystemExit(f"ERROR: File does not exist: {config_file}")
@@ -89,7 +97,13 @@ def validate(config_file: Path, validation: str = "full") -> int:
         print(f"[autoinstall-helper] Base image: {base_image}")
         docker_build(tag, version, base_image, dockerfile)
 
-    rc = docker_validate(tag, config_file, validation)
+    rc = docker_validate(
+        tag,
+        config_file,
+        validation,
+        shellcheck=shellcheck,
+        shellcheck_severity=shellcheck_severity,
+    )
     if rc == 0:
         print("[autoinstall-helper] Validation completed successfully!")
     else:
@@ -131,12 +145,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_val.add_argument(
         "--validation",
-        choices=("autoinstall", "storage", "full"),
+        choices=("autoinstall", "storage", "commands", "full"),
         default="full",
         help=(
             "Validation scope: autoinstall (Subiquity), storage (storage actions + "
-            "Curtin schema), full (both checks; default)"
+            "Curtin schema), commands (shell syntax of early/late/error commands), "
+            "full (all checks; default)"
         ),
+    )
+    p_val.add_argument(
+        "--no-shellcheck",
+        dest="shellcheck",
+        action="store_false",
+        default=True,
+        help="Skip the shellcheck pass (the sh -n / bash -n syntax check always runs)",
+    )
+    p_val.add_argument(
+        "--shellcheck-severity",
+        choices=SHELLCHECK_SEVERITIES,
+        default="error",
+        help="Minimum shellcheck severity that fails validation (default: error)",
     )
     p_val.add_argument(
         "--prune",
@@ -420,7 +448,12 @@ def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             )
         if action == "doctor":
             return docker_doctor()
-        return validate(args.config, validation=args.validation)
+        return validate(
+            args.config,
+            validation=args.validation,
+            shellcheck=args.shellcheck,
+            shellcheck_severity=args.shellcheck_severity,
+        )
 
     if args.subcommand == "flash":
         # Flashing to a physical block device requires root to prevent accidental overwrites,
