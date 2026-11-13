@@ -74,5 +74,6 @@ Notes:
 | `validate-cached-image` | `snap`/Snap API version, `docker image inspect`, `docker run` | Docker; validator image already built | `--record … validate <autoinstall.yaml>` | `cli.validate(config) == 0` |
 | `validate-build` | Snap API `urlopen`, GitHub `urlopen`, `docker build`, `docker run` | Docker; network; image absent | `--record … validate <autoinstall.yaml>` | `cli.validate(config) == 0` |
 | `validate-invalid` | Same, but the validator exits non-zero | Docker; a config that fails validation | `--record … validate <wrong-autoinstall.yaml>` | `cli.validate(config) == <rc>` |
+| `validate-images` | `docker image ls --format` + status from the bundled assets digest | Docker; at least one validator image built | `--record … validate images` | `docker_images() == 0`; every recorded tag is listed (assert on tags, not on `current`/`stale` — the digest follows the `docker/` assets) |
 | `vm-create-dry-run` | Media metadata + printed `virt-install` command | None (no libvirt needed) | `--record … vm create <name> --media <media.img> --dry-run` | `vm.create(spec, dry_run=True) == 0` |
 | `vm-create` | `virsh`/`virt-install`/`qemu-img` full create | libvirt + KVM; media image | `--record … vm create <name> --media <media.img>` | `vm.create(spec) == 0` |
